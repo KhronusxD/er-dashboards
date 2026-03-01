@@ -185,6 +185,10 @@ export default function App() {
       const [year, month, day] = dateStr.split('T')[0].split('-');
       return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     }
+    if (dateStr.includes('-')) {
+      const [year, month, day] = dateStr.split('-');
+      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    }
     const [day, month] = dateStr.split('/');
     if (!day || !month) return null;
     const year = new Date().getFullYear();
@@ -296,11 +300,11 @@ export default function App() {
         const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
         if (!isNaN(g)) investimentoGoogle += g;
 
-        const pStr = row["Conversões"] || "0";
+        const pStr = row["Compras Meta"] || row["Conversões"] || "0";
         const p = parseFloat(pStr.replace(/\./g, '').replace(',', '.'));
         if (!isNaN(p)) googlePurchases += p;
 
-        const fStr = row["Valor da conversão"] || "0";
+        const fStr = row["Faturamento Google Ads"] || row["Valor da conversão"] || "0";
         const f = parseFloat(fStr.replace(/\./g, '').replace(',', '.'));
         if (!isNaN(f)) faturamentoGoogle += f;
       }
@@ -346,18 +350,15 @@ export default function App() {
       if (!rowDate) return;
 
       if (isDateInRange(rowDate)) {
-        const mappings: Record<string, string> = {
-          'Cliques': 'Cliques no Link',
-          // Visualizações e Adições no carrinho ainda precisam de eventos configurados no GA,
-          // se tivessem poderíamos somar aqui. Por enquando somamos 'Conversões' a 'Compras Meta'.
-          'Conversões': 'Compras Meta'
-        };
+        // Tenta os nomes novos da planilha, ou faz graceful fallback para os nomes antigos do CSV Google Ads default
+        const clicks = row['Cliques no Link'] || row['Cliques'] || "0";
+        const conversions = row['Compras Meta'] || row['Conversões'] || "0";
 
-        Object.entries(mappings).forEach(([googleKey, funnelKey]) => {
-          const valStr = row[googleKey] || "0";
-          const val = parseFloat(valStr.replace(/\./g, '').replace(',', '.'));
-          if (!isNaN(val)) data[funnelKey] += val;
-        });
+        const valClicks = parseFloat(clicks.replace(/\./g, '').replace(',', '.'));
+        if (!isNaN(valClicks)) data['Cliques no Link'] += valClicks;
+
+        const valConversions = parseFloat(conversions.replace(/\./g, '').replace(',', '.'));
+        if (!isNaN(valConversions)) data['Compras Meta'] += valConversions;
       }
     });
 
@@ -434,8 +435,8 @@ export default function App() {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all whitespace-nowrap ${activeTab === tab.id
-                    ? "bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100"
-                    : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 border border-transparent"
+                  ? "bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100"
+                  : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 border border-transparent"
                   }`}
               >
                 {tab.icon}
@@ -902,10 +903,10 @@ export default function App() {
                                   {isStatus ? (
                                     <span
                                       className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${value?.toLowerCase() === "aprovado" || value?.toLowerCase() === "pago"
-                                          ? "bg-emerald-100 text-emerald-800"
-                                          : value?.toLowerCase() === "pendente"
-                                            ? "bg-amber-100 text-amber-800"
-                                            : "bg-neutral-100 text-neutral-800"
+                                        ? "bg-emerald-100 text-emerald-800"
+                                        : value?.toLowerCase() === "pendente"
+                                          ? "bg-amber-100 text-amber-800"
+                                          : "bg-neutral-100 text-neutral-800"
                                         }`}
                                     >
                                       {value || '-'}
@@ -955,8 +956,8 @@ export default function App() {
                       : setIsEditingStrategy(true)
                   }
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isEditingStrategy
-                      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                      : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700"
+                    ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                    : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700"
                     }`}
                 >
                   {isEditingStrategy ? (
