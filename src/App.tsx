@@ -86,13 +86,13 @@ export default function App() {
     setTrafficError(null);
     setIsFetchingGoogleAds(true);
     setGoogleAdsError(null);
-    
+
     const currentCompanyObj = companies.find((c) => c.id === selectedCompany);
     const tabName = currentCompanyObj?.name || "";
-    
+
     // Fetch Revenue Sheet
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
-    
+
     Papa.parse(url, {
       download: true,
       header: true,
@@ -118,7 +118,7 @@ export default function App() {
 
     // Fetch Traffic Sheet
     const trafficUrl = `https://docs.google.com/spreadsheets/d/${TRAFFIC_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
-    
+
     Papa.parse(trafficUrl, {
       download: true,
       header: true,
@@ -144,7 +144,7 @@ export default function App() {
     // Fetch Google Ads Sheet
     const googleAdsTabName = `${tabName} - Google Ads`;
     const googleAdsUrl = `https://docs.google.com/spreadsheets/d/${TRAFFIC_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(googleAdsTabName)}`;
-    
+
     Papa.parse(googleAdsUrl, {
       download: true,
       header: true,
@@ -194,10 +194,10 @@ export default function App() {
   // Check if a date is within the selected range
   const isDateInRange = (rowDate: Date | null) => {
     if (!rowDate) return true;
-    
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     // Normalize rowDate to midnight for accurate comparison
     const normalizedRowDate = new Date(rowDate);
     normalizedRowDate.setHours(0, 0, 0, 0);
@@ -258,7 +258,7 @@ export default function App() {
   });
 
   const formattedRevenue = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(computedMetrics.revenue);
-  
+
   // Compute traffic metrics
   const computedTrafficMetrics = useMemo(() => {
     let investimentoMeta = 0;
@@ -271,7 +271,7 @@ export default function App() {
     trafficData.forEach(row => {
       const rowDate = parseDate(row["Data"]);
       if (!rowDate) return;
-      
+
       if (isDateInRange(rowDate)) {
         const gStr = row["Investimento"] || row["Gastos"] || "0";
         const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
@@ -290,17 +290,17 @@ export default function App() {
     googleAdsData.forEach(row => {
       const rowDate = parseDate(row["Data"]);
       if (!rowDate) return;
-      
+
       if (isDateInRange(rowDate)) {
         const gStr = row["Investimento"] || row["Gastos"] || "0";
         const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
         if (!isNaN(g)) investimentoGoogle += g;
 
-        const pStr = row["Compras Meta"] || row["Compras Google"] || "0";
+        const pStr = row["Conversões"] || "0";
         const p = parseFloat(pStr.replace(/\./g, '').replace(',', '.'));
         if (!isNaN(p)) googlePurchases += p;
 
-        const fStr = row["Faturamento Google Ads"] || "0";
+        const fStr = row["Valor da conversão"] || "0";
         const f = parseFloat(fStr.replace(/\./g, '').replace(',', '.'));
         if (!isNaN(f)) faturamentoGoogle += f;
       }
@@ -308,11 +308,11 @@ export default function App() {
 
     const investimentoTotal = investimentoMeta + investimentoGoogle;
 
-    return { 
-      investimentoMeta, 
-      investimentoGoogle, 
-      investimentoTotal, 
-      metaPurchases, 
+    return {
+      investimentoMeta,
+      investimentoGoogle,
+      investimentoTotal,
+      metaPurchases,
       googlePurchases,
       faturamentoMeta,
       faturamentoGoogle
@@ -331,7 +331,7 @@ export default function App() {
     trafficData.forEach(row => {
       const rowDate = parseDate(row["Data"]);
       if (!rowDate) return;
-      
+
       if (isDateInRange(rowDate)) {
         ['Cliques no Link', 'Visualizações de Página', 'Adições no Carrinho', 'Checkout', 'Compras Meta'].forEach(key => {
           const valStr = row[key] || "0";
@@ -341,13 +341,33 @@ export default function App() {
       }
     });
 
+    googleAdsData.forEach(row => {
+      const rowDate = parseDate(row["Data"]);
+      if (!rowDate) return;
+
+      if (isDateInRange(rowDate)) {
+        const mappings: Record<string, string> = {
+          'Cliques': 'Cliques no Link',
+          // Visualizações e Adições no carrinho ainda precisam de eventos configurados no GA,
+          // se tivessem poderíamos somar aqui. Por enquando somamos 'Conversões' a 'Compras Meta'.
+          'Conversões': 'Compras Meta'
+        };
+
+        Object.entries(mappings).forEach(([googleKey, funnelKey]) => {
+          const valStr = row[googleKey] || "0";
+          const val = parseFloat(valStr.replace(/\./g, '').replace(',', '.'));
+          if (!isNaN(val)) data[funnelKey] += val;
+        });
+      }
+    });
+
     return data;
-  }, [trafficData, dateRange, customStartDate, customEndDate]);
+  }, [trafficData, googleAdsData, dateRange, customStartDate, customEndDate]);
 
   // Calculate ROI based on real revenue and real investment
   const investmentNum = computedTrafficMetrics.investimentoTotal;
   let calculatedRoi = "0.00x";
-  
+
   if (!isNaN(investmentNum) && investmentNum > 0 && computedMetrics.revenue > 0) {
     const roi = computedMetrics.revenue / investmentNum;
     calculatedRoi = `${roi.toFixed(2)}x`;
@@ -413,11 +433,10 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all whitespace-nowrap ${
-                  activeTab === tab.id
+                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all whitespace-nowrap ${activeTab === tab.id
                     ? "bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100"
                     : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 border border-transparent"
-                }`}
+                  }`}
               >
                 {tab.icon}
                 {tab.label}
@@ -637,7 +656,7 @@ export default function App() {
                   {/* Visual Funnel */}
                   <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm p-6">
                     <h3 className="font-semibold text-neutral-800 mb-6">Jornada do Cliente</h3>
-                    
+
                     <div className="space-y-4">
                       {[
                         {
@@ -737,14 +756,18 @@ export default function App() {
                   {/* Meta vs Total Comparison */}
                   <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-6 flex flex-col">
                     <h3 className="font-semibold text-neutral-800 mb-6">Origem das Compras</h3>
-                    
+
                     <div className="flex-1 flex flex-col justify-center gap-8">
                       {(() => {
                         const metaPurchases = computedTrafficMetrics.metaPurchases;
+                        const googlePurchases = computedTrafficMetrics.googlePurchases;
+                        const trackedPurchases = metaPurchases + googlePurchases;
                         const totalPurchases = computedMetrics.purchases; // From the first sheet
 
                         const metaPercentage = totalPurchases > 0 ? ((metaPurchases / totalPurchases) * 100).toFixed(1) : "0.0";
-                        const otherPercentage = totalPurchases > 0 ? (((totalPurchases - metaPurchases) / totalPurchases) * 100).toFixed(1) : "0.0";
+                        const googlePercentage = totalPurchases > 0 ? ((googlePurchases / totalPurchases) * 100).toFixed(1) : "0.0";
+                        const otherPurchases = Math.max(0, totalPurchases - trackedPurchases);
+                        const otherPercentage = totalPurchases > 0 ? ((otherPurchases / totalPurchases) * 100).toFixed(1) : "0.0";
 
                         return (
                           <>
@@ -752,7 +775,7 @@ export default function App() {
                               <div className="text-sm font-medium text-neutral-500 mb-1">Total de Compras (Geral)</div>
                               <div className="text-4xl font-bold text-neutral-900">{totalPurchases.toLocaleString('pt-BR')}</div>
                             </div>
-                            
+
                             <div className="space-y-4">
                               <div>
                                 <div className="flex justify-between text-sm mb-1">
@@ -766,24 +789,37 @@ export default function App() {
                                   <div className="bg-indigo-500 h-2.5 rounded-full" style={{ width: `${metaPercentage}%` }}></div>
                                 </div>
                               </div>
-                              
+
+                              <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                  <span className="font-medium text-emerald-700 flex items-center gap-1">
+                                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                                    Google Ads
+                                  </span>
+                                  <span className="font-bold text-emerald-700">{googlePurchases.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ({googlePercentage}%)</span>
+                                </div>
+                                <div className="w-full bg-neutral-100 rounded-full h-2.5">
+                                  <div className="bg-emerald-500 h-2.5 rounded-full" style={{ width: `${googlePercentage}%` }}></div>
+                                </div>
+                              </div>
+
                               <div>
                                 <div className="flex justify-between text-sm mb-1">
                                   <span className="font-medium text-neutral-600 flex items-center gap-1">
                                     <div className="w-2 h-2 rounded-full bg-neutral-300"></div>
-                                    Outras Fontes (Orgânico, Google, etc)
+                                    Outras Fontes (Orgânico, etc)
                                   </span>
-                                  <span className="font-bold text-neutral-700">{(totalPurchases - metaPurchases).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ({otherPercentage}%)</span>
+                                  <span className="font-bold text-neutral-700">{otherPurchases.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ({otherPercentage}%)</span>
                                 </div>
                                 <div className="w-full bg-neutral-100 rounded-full h-2.5">
                                   <div className="bg-neutral-300 h-2.5 rounded-full" style={{ width: `${otherPercentage}%` }}></div>
                                 </div>
                               </div>
                             </div>
-                            
+
                             <div className="mt-auto pt-4 border-t border-neutral-100">
                               <p className="text-xs text-neutral-500 text-center">
-                                Os dados do Meta Ads vêm da planilha de tráfego, enquanto o total vem da planilha de faturamento.
+                                Os dados do Meta e Google vêm da planilha de tráfego, enquanto o total vem da planilha de faturamento real.
                               </p>
                             </div>
                           </>
@@ -817,7 +853,7 @@ export default function App() {
                   />
                 </div>
               </div>
-              
+
               {isFetchingSheet ? (
                 <div className="p-16 flex flex-col items-center justify-center text-neutral-500">
                   <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
@@ -860,18 +896,17 @@ export default function App() {
                             {sheetHeaders.map((header, colIndex) => {
                               const value = row[header];
                               const isStatus = header.toLowerCase().includes('status');
-                              
+
                               return (
                                 <td key={colIndex} className="px-6 py-4 whitespace-nowrap text-neutral-600">
                                   {isStatus ? (
                                     <span
-                                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                        value?.toLowerCase() === "aprovado" || value?.toLowerCase() === "pago"
+                                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${value?.toLowerCase() === "aprovado" || value?.toLowerCase() === "pago"
                                           ? "bg-emerald-100 text-emerald-800"
                                           : value?.toLowerCase() === "pendente"
                                             ? "bg-amber-100 text-amber-800"
                                             : "bg-neutral-100 text-neutral-800"
-                                      }`}
+                                        }`}
                                     >
                                       {value || '-'}
                                     </span>
@@ -919,11 +954,10 @@ export default function App() {
                       ? handleSaveStrategy()
                       : setIsEditingStrategy(true)
                   }
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    isEditingStrategy
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isEditingStrategy
                       ? "bg-emerald-600 hover:bg-emerald-700 text-white"
                       : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700"
-                  }`}
+                    }`}
                 >
                   {isEditingStrategy ? (
                     <>
