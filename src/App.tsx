@@ -340,7 +340,51 @@ export default function App() {
   const basicScore = calculateHealthScore('basic');
   const campaignScore = calculateHealthScore('campaign');
   const trackingScore = calculateHealthScore('tracking');
-  const overallHealthScore = (basicScore + campaignScore + trackingScore) / 3;
+
+  const calculateSingleMetricScore = (metric: any) => {
+    const { value, good, excellent, inverse } = metric;
+    const numValue = Number(value);
+    const numGood = Number(good);
+    const numExcellent = Number(excellent);
+
+    // Safety check if numbers are invalid
+    if (isNaN(numValue) || isNaN(numGood) || isNaN(numExcellent)) return 0;
+
+    if (inverse) {
+      if (numValue >= numExcellent) return 10;
+      if (numValue < numGood) return 0;
+      // Interpolate between good and excellent (5 to 10)
+      const range = numExcellent - numGood;
+      const position = numValue - numGood;
+      return 5 + (position / range) * 5;
+    } else {
+      if (numValue <= numExcellent) return 10;
+      if (numValue > numGood) return 0;
+      // Interpolate between good and excellent (5 to 10), but backwards
+      const range = numGood - numExcellent;
+      const position = numGood - numValue;
+      return 5 + (position / range) * 5;
+    }
+  };
+
+  const getModuleAvgScore = (moduleName: string) => {
+    const moduleMetrics = Object.values((accountHealth.metrics as any)[moduleName] || {});
+    if (moduleMetrics.length === 0) return 0;
+
+    let totalScore = 0;
+    moduleMetrics.forEach((m: any) => {
+      totalScore += calculateSingleMetricScore(m);
+    });
+
+    return totalScore / moduleMetrics.length;
+  };
+
+  const croScore = getModuleAvgScore('cro');
+  const creativeScore = getModuleAvgScore('creative');
+  const dataScore = getModuleAvgScore('data');
+  const financeScore = getModuleAvgScore('finance');
+
+  const overallHealthScore = (basicScore + campaignScore + trackingScore + croScore + creativeScore + dataScore + financeScore) / 7;
   const overallHealthConfig = getHealthColorConfig(overallHealthScore);
 
   const getMetricHealthColor = (metric: any) => {
@@ -1722,28 +1766,28 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {/* Modulo 1: CRO */}
-                <AdHealthModule title="CRO e Experiência de Página">
+                <AdHealthModule title="CRO e Experiência de Página" score={croScore} config={getHealthColorConfig(croScore)}>
                   {Object.entries((accountHealth.metrics as any).cro).map(([key, metric]: [string, any]) => (
                     <EditableMetricCard key={key} metric={metric} metricKey={key} moduleName="cro" getMetricHealthColor={getMetricHealthColor} onChange={handleMetricChange} />
                   ))}
                 </AdHealthModule>
 
                 {/* Modulo 2: Creative */}
-                <AdHealthModule title="Saúde Criativa e Retenção">
+                <AdHealthModule title="Saúde Criativa e Retenção" score={creativeScore} config={getHealthColorConfig(creativeScore)}>
                   {Object.entries((accountHealth.metrics as any).creative).map(([key, metric]: [string, any]) => (
                     <EditableMetricCard key={key} metric={metric} metricKey={key} moduleName="creative" getMetricHealthColor={getMetricHealthColor} onChange={handleMetricChange} />
                   ))}
                 </AdHealthModule>
 
                 {/* Modulo 3: Data */}
-                <AdHealthModule title="Qualidade de Dados (CAPI)">
+                <AdHealthModule title="Qualidade de Dados (CAPI)" score={dataScore} config={getHealthColorConfig(dataScore)}>
                   {Object.entries((accountHealth.metrics as any).data).map(([key, metric]: [string, any]) => (
                     <EditableMetricCard key={key} metric={metric} metricKey={key} moduleName="data" getMetricHealthColor={getMetricHealthColor} onChange={handleMetricChange} />
                   ))}
                 </AdHealthModule>
 
                 {/* Modulo 4: Finance */}
-                <AdHealthModule title="Saúde Financeira e Escala">
+                <AdHealthModule title="Saúde Financeira e Escala" score={financeScore} config={getHealthColorConfig(financeScore)}>
                   {Object.entries((accountHealth.metrics as any).finance).map(([key, metric]: [string, any]) => (
                     <EditableMetricCard key={key} metric={metric} metricKey={key} moduleName="finance" getMetricHealthColor={getMetricHealthColor} onChange={handleMetricChange} />
                   ))}
@@ -1819,11 +1863,27 @@ function HealthCategoryCard({ title, score, config, items, state, onChange }: {
   );
 }
 
-function AdHealthModule({ title, children }: { title: string, children: React.ReactNode }) {
+function AdHealthModule({ title, score, config, children }: { title: string, score: number, config: any, children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-6 flex flex-col">
-      <h3 className="font-bold text-neutral-800 mb-5">{title}</h3>
-      <div className="space-y-4 flex-1">
+    <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm flex flex-col overflow-hidden">
+      <div className={`p-5 min-h-[140px] flex flex-col justify-between ${config.bg} border-b ${config.border} transition-colors duration-500`}>
+        <div className="flex justify-between items-start gap-2">
+          <h3 className="font-bold text-neutral-800 leading-tight">{title}</h3>
+          <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide bg-white shadow-sm ${config.text}`}>
+            {config.label}
+          </span>
+        </div>
+        <div className="mt-4">
+          <div className="flex items-end justify-between mb-2">
+            <span className={`text-3xl font-black ${config.text}`}>{score.toFixed(1)}</span>
+            <span className="text-xs font-semibold text-neutral-500 uppercase">Média do Módulo</span>
+          </div>
+          <div className="h-1.5 w-full bg-black/5 rounded-full overflow-hidden">
+            <div className={`h-full ${config.bar} transition-all duration-500 ease-out`} style={{ width: `${score * 10}%` }} />
+          </div>
+        </div>
+      </div>
+      <div className="p-5 flex-1 bg-white space-y-4">
         {children}
       </div>
     </div>
