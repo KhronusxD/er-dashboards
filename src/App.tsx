@@ -34,8 +34,15 @@ import {
   performanceMetrics,
   strategyConfig,
 } from "./data/mockData";
+import { supabase } from "./lib/supabase";
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
   const [selectedCompany, setSelectedCompany] = useState(companies[0].id);
   const [activeTab, setActiveTab] = useState("overview");
   const [dateRange, setDateRange] = useState("Últimos 30 dias");
@@ -82,9 +89,25 @@ export default function App() {
   const TRAFFIC_SHEET_ID = "1om3vD7mik6psxaLjt6QGqnkEnGdpr6T5dBrNIjYa4BY";
 
   useEffect(() => {
-    setLocalStrategy(
-      strategyConfig[selectedCompany] || strategyConfig["atual-card"],
-    );
+    const fetchStrategy = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('strategies')
+          .select('strategy_data')
+          .eq('company_id', selectedCompany)
+          .single();
+
+        if (data && data.strategy_data) {
+          setLocalStrategy(data.strategy_data);
+        } else {
+          setLocalStrategy(strategyConfig[selectedCompany] || strategyConfig["atual-card"]);
+        }
+      } catch (err) {
+        console.error("Strategy load error", err);
+        setLocalStrategy(strategyConfig[selectedCompany] || strategyConfig["atual-card"]);
+      }
+    };
+    fetchStrategy();
     setIsEditingStrategy(false);
   }, [selectedCompany]);
 
@@ -178,9 +201,30 @@ export default function App() {
 
   }, [selectedCompany, refreshTrigger]);
 
-  const handleSaveStrategy = () => {
-    // In a real app, this would save to a backend
-    setIsEditingStrategy(false);
+  const [isSavingStrategy, setIsSavingStrategy] = useState(false);
+
+  const handleSaveStrategy = async () => {
+    setIsSavingStrategy(true);
+    try {
+      const { error } = await supabase
+        .from('strategies')
+        .upsert({
+          company_id: selectedCompany,
+          strategy_data: localStrategy
+        }, { onConflict: 'company_id' });
+
+      if (!error) {
+        setIsEditingStrategy(false);
+      } else {
+        alert("Erro ao salvar a estratégia no banco de dados.");
+        console.error(error);
+      }
+    } catch (err) {
+      alert("Erro ao salvar a estratégia.");
+      console.error(err);
+    } finally {
+      setIsSavingStrategy(false);
+    }
   };
 
   const currentCompany = companies.find((c) => c.id === selectedCompany);
@@ -416,6 +460,84 @@ export default function App() {
   let googleRoi = "0.00x";
   if (computedTrafficMetrics.investimentoGoogle > 0) {
     googleRoi = `${(computedTrafficMetrics.faturamentoGoogle / computedTrafficMetrics.investimentoGoogle).toFixed(2)}x`;
+  }
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoggingIn(true);
+    setLoginError("");
+
+    try {
+      const { data, error } = await supabase
+        .from('app_users')
+        .select('*')
+        .eq('username', loginUsername)
+        .eq('password', loginPassword)
+        .single();
+
+      if (error || !data) {
+        setLoginError("Usuário ou senha inválidos.");
+      } else {
+        setIsAuthenticated(true);
+      }
+    } catch (err) {
+      setLoginError("Erro ao conectar.");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-neutral-900 flex items-center justify-center p-4 font-sans">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
+          <div className="p-8">
+            <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center mb-6">
+              <BarChart3 className="w-6 h-6 text-white" />
+            </div>
+            <h2 className="text-2xl font-bold text-neutral-900 mb-2">Login NAPAN</h2>
+            <p className="text-neutral-500 mb-8">Faça login para acessar o Traffic Hub</p>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">Usuário</label>
+                <input
+                  type="text"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">Senha</label>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
+                  required
+                />
+              </div>
+
+              {loginError && (
+                <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100">
+                  {loginError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2"
+              >
+                {isLoggingIn ? "Acessando..." : "Entrar"}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -715,8 +837,8 @@ export default function App() {
                       key={source}
                       onClick={() => setFunnelSource(source)}
                       className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${funnelSource === source
-                          ? 'bg-white text-indigo-700 shadow-sm'
-                          : 'text-neutral-500 hover:text-neutral-700'
+                        ? 'bg-white text-indigo-700 shadow-sm'
+                        : 'text-neutral-500 hover:text-neutral-700'
                         }`}
                     >
                       {source === 'all' ? 'Visão Geral (Todos)' : source === 'meta' ? 'Meta Ads' : 'Google Ads'}
