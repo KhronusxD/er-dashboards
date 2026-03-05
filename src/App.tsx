@@ -1068,7 +1068,10 @@ export default function App() {
       if (isDateInRangeLocal(d)) {
         const gStr = row["Investimento"] || row["Gastos"] || "0";
         const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
-        if (!isNaN(g)) inv += g;
+        if (!isNaN(g)) {
+          inv += g;
+          metaInv += g;
+        }
 
         const cStr = row["Cliques no Link"] || row["Cliques"] || "0";
         const cNum = parseInt(cStr.replace(/\./g, ''), 10);
