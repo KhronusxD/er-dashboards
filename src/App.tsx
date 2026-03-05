@@ -1205,6 +1205,11 @@ export default function App() {
                 label: "Visão Mensal",
                 icon: <CalendarDays className="w-4 h-4" />,
               },
+              {
+                id: "simulations",
+                label: "Simulador",
+                icon: <Lightbulb className="w-4 h-4" />,
+              },
             ].map((tab) => (
               <button
                 key={tab.id}
