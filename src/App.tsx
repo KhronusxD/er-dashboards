@@ -45,7 +45,8 @@ import {
   Info,
   ArrowUpRight,
   ArrowDownRight,
-  Minus
+  Minus,
+  LogOut
 } from "lucide-react";
 
 import {
@@ -942,6 +943,15 @@ export default function App() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      setIsAuthenticated(false);
+    } catch (err) {
+      console.error("Erro ao fazer logout:", err);
+    }
+  };
+
   const monthlyMetrics = useMemo(() => {
     if (activeTab !== "monthly") return null;
 
@@ -1295,20 +1305,30 @@ export default function App() {
             </h1>
           </div>
 
-          <div className="relative">
-            <select
-              value={selectedCompany}
-              onChange={(e) => setSelectedCompany(e.target.value)}
-              disabled={allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0}
-              className={`appearance-none bg-neutral-100 border border-neutral-200 text-neutral-800 py-2 pl-4 pr-10 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0 ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <select
+                value={selectedCompany}
+                onChange={(e) => setSelectedCompany(e.target.value)}
+                disabled={allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0}
+                className={`appearance-none bg-neutral-100 border border-neutral-200 text-neutral-800 py-2 pl-4 pr-10 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0 ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                {companies.filter(c => allowedCompanyIds.length === 0 || allowedCompanyIds.includes(c.id)).map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {company.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-neutral-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+
+            <button
+              onClick={handleLogout}
+              className="flex items-center justify-center w-10 h-10 rounded-lg text-neutral-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+              title="Sair do sistema"
             >
-              {companies.filter(c => allowedCompanyIds.length === 0 || allowedCompanyIds.includes(c.id)).map((company) => (
-                <option key={company.id} value={company.id}>
-                  {company.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="w-4 h-4 text-neutral-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <LogOut className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </header>
