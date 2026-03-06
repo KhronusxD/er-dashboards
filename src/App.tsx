@@ -242,7 +242,11 @@ export default function App() {
           return;
         }
 
-        const ids = data.map((d: any) => d.company_id);
+        const ids = data.map((d: any) => {
+          if (d.company_id === 'ALL') return 'ALL';
+          // Normaliza 'Fabrica_do_Livro' para 'fabrica-do-livro'
+          return d.company_id.toLowerCase().replace(/_/g, '-');
+        });
         if (ids.includes('ALL')) {
           setAllowedCompanyIds(companies.map(c => c.id));
         } else {
