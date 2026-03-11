@@ -401,7 +401,7 @@ export default function App() {
                 return {
                   ...row,
                   "Data": row[""] || row["Data"],
-                  "Investimento": getVal(["Invest. Meta Ads", "Invest. Meta"]),
+                  "Investimento": getVal(["Investimento Meta Ads", "Invest. Meta Ads", "Invest. Meta"]),
                   "Faturamento Meta Ads": "0",
                   "Compras Meta": "0",
                   "Cliques no Link": "0",
@@ -451,7 +451,7 @@ export default function App() {
                 return {
                   ...row,
                   "Data": row[""] || row["Data"],
-                  "Investimento": getVal(["Invest. Google Ads", "Invest. Google"]),
+                  "Investimento": getVal(["Investimento Google Ads", "Invest. Google Ads", "Invest. Google"]),
                   "Valor da conversão": "0",
                   "Conversões": "0",
                   "Cliques": "0",
