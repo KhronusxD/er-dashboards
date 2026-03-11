@@ -264,6 +264,10 @@ export default function App() {
 
         const ids = data.map((d: any) => {
           if (d.company_id === 'ALL') return 'ALL';
+
+          const exactMatch = companies.find(c => c.id === d.company_id);
+          if (exactMatch) return exactMatch.id;
+
           // Normaliza 'Fabrica_do_Livro' para 'fabrica-do-livro'
           return d.company_id.toLowerCase().replace(/_/g, '-');
         });
