@@ -882,7 +882,7 @@ export default function App() {
 
   filteredData.forEach(row => {
     const revenueStr = row["Pedidos Pagos"] || "0";
-    const revenueNum = parseFloat(revenueStr.replace(/\./g, '').replace(',', '.'));
+    const revenueNum = parseFloat(revenueStr.replace(/[^\d,-]/g, '').replace(',', '.'));
     if (!isNaN(revenueNum)) computedMetrics.revenue += revenueNum;
 
     const purchasesStr = row["Quantidade Pedidos"] || "0";
@@ -892,7 +892,7 @@ export default function App() {
 
   previousFilteredData.forEach(row => {
     const revenueStr = row["Pedidos Pagos"] || "0";
-    const revenueNum = parseFloat(revenueStr.replace(/\./g, '').replace(',', '.'));
+    const revenueNum = parseFloat(revenueStr.replace(/[^\d,-]/g, '').replace(',', '.'));
     if (!isNaN(revenueNum)) computedMetrics.prevRevenue += revenueNum;
 
     const purchasesStr = row["Quantidade Pedidos"] || "0";
@@ -939,7 +939,7 @@ export default function App() {
       if (d) {
         const dayData = getOrCreateDay(d);
         const rStr = row["Pedidos Pagos"] || "0";
-        const rNum = parseFloat(rStr.replace(/\./g, '').replace(',', '.'));
+        const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(rNum)) dayData.totalRevenue += rNum;
       }
     });
@@ -951,11 +951,11 @@ export default function App() {
         const dayData = getOrCreateDay(d);
 
         const gStr = row["Investimento"] || row["Gastos"] || "0";
-        const gNum = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
+        const gNum = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(gNum)) dayData.metaCost += gNum;
 
         const rStr = row["Faturamento Meta Ads"] || "0";
-        const rNum = parseFloat(rStr.replace(/\./g, '').replace(',', '.'));
+        const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(rNum)) dayData.metaRevenue += rNum;
       }
     });
@@ -967,11 +967,11 @@ export default function App() {
         const dayData = getOrCreateDay(d);
 
         const gStr = row["Investimento"] || row["Gastos"] || "0";
-        const gNum = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
+        const gNum = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(gNum)) dayData.googleCost += gNum;
 
         const rStr = row["Faturamento Google Ads"] || row["Valor da conversão"] || "0";
-        const rNum = parseFloat(rStr.replace(/\./g, '').replace(',', '.'));
+        const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(rNum)) dayData.googleRevenue += rNum;
       }
     });
@@ -1008,11 +1008,11 @@ export default function App() {
       if (!rowDate) return;
 
       const gStr = row["Investimento"] || row["Gastos"] || "0";
-      const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
+      const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
       const pStr = row["Compras Meta"] || "0";
-      const p = parseFloat(pStr.replace(/\./g, '').replace(',', '.'));
+      const p = parseFloat(pStr.replace(/[^\d,-]/g, '').replace(',', '.'));
       const fStr = row["Faturamento Meta Ads"] || "0";
-      const f = parseFloat(fStr.replace(/\./g, '').replace(',', '.'));
+      const f = parseFloat(fStr.replace(/[^\d,-]/g, '').replace(',', '.'));
 
       if (isDateInRange(rowDate)) {
         if (!isNaN(g)) investimentoMeta += g;
@@ -1030,11 +1030,11 @@ export default function App() {
       if (!rowDate) return;
 
       const gStr = row["Investimento"] || row["Gastos"] || "0";
-      const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
+      const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
       const pStr = row["Compras Meta"] || row["Conversões"] || "0";
-      const p = parseFloat(pStr.replace(/\./g, '').replace(',', '.'));
+      const p = parseFloat(pStr.replace(/[^\d,-]/g, '').replace(',', '.'));
       const fStr = row["Faturamento Google Ads"] || row["Valor da conversão"] || "0";
-      const f = parseFloat(fStr.replace(/\./g, '').replace(',', '.'));
+      const f = parseFloat(fStr.replace(/[^\d,-]/g, '').replace(',', '.'));
 
       if (isDateInRange(rowDate)) {
         if (!isNaN(g)) investimentoGoogle += g;
@@ -1118,13 +1118,13 @@ export default function App() {
         const clicks = row['Cliques no Link'] || row['Cliques'] || "0";
         const conversions = row['Compras Meta'] || row['Conversões'] || "0";
 
-        const valClicks = parseFloat(clicks.replace(/\./g, '').replace(',', '.'));
+        const valClicks = parseFloat(clicks.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(valClicks)) {
           google['Cliques no Link'] += valClicks;
           all['Cliques no Link'] += valClicks;
         }
 
-        const valConversions = parseFloat(conversions.replace(/\./g, '').replace(',', '.'));
+        const valConversions = parseFloat(conversions.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(valConversions)) {
           google['Compras Meta'] += valConversions;
           all['Compras Meta'] += valConversions;
@@ -1292,7 +1292,7 @@ export default function App() {
         const d = parseDate(row["Data"]);
         if (isDateInRangeLocal(d)) {
           const rStr = row["Pedidos Pagos"] || "0";
-          const rNum = parseFloat(rStr.replace(/\./g, '').replace(',', '.'));
+          const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
           if (!isNaN(rNum)) revenue += rNum;
           const pStr = row["Quantidade Pedidos"] || "0";
           const pNum = parseInt(pStr, 10);
@@ -1304,15 +1304,15 @@ export default function App() {
         const d = parseDate(row["Data"]);
         if (isDateInRangeLocal(d)) {
           const gStr = row["Investimento"] || row["Gastos"] || "0";
-          const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
+          const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
           if (!isNaN(g)) invMeta += g;
 
           const pStr = row["Compras Meta"] || "0";
-          const p = parseFloat(pStr.replace(/\./g, '').replace(',', '.'));
+          const p = parseFloat(pStr.replace(/[^\d,-]/g, '').replace(',', '.'));
           if (!isNaN(p)) metaPurchases += p;
 
           const fStr = row["Faturamento Meta Ads"] || "0";
-          const f = parseFloat(fStr.replace(/\./g, '').replace(',', '.'));
+          const f = parseFloat(fStr.replace(/[^\d,-]/g, '').replace(',', '.'));
           if (!isNaN(f)) metaRevenue += f;
         }
       });
@@ -1321,15 +1321,15 @@ export default function App() {
         const d = parseDate(row["Data"]);
         if (isDateInRangeLocal(d)) {
           const gStr = row["Investimento"] || row["Gastos"] || "0";
-          const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
+          const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
           if (!isNaN(g)) invGoogle += g;
 
           const pStr = row["Compras Meta"] || row["Conversões"] || "0";
-          const p = parseFloat(pStr.replace(/\./g, '').replace(',', '.'));
+          const p = parseFloat(pStr.replace(/[^\d,-]/g, '').replace(',', '.'));
           if (!isNaN(p)) googlePurchases += p;
 
           const fStr = row["Faturamento Google Ads"] || row["Valor da conversão"] || "0";
-          const f = parseFloat(fStr.replace(/\./g, '').replace(',', '.'));
+          const f = parseFloat(fStr.replace(/[^\d,-]/g, '').replace(',', '.'));
           if (!isNaN(f)) googleRevenue += f;
         }
       });
@@ -1393,7 +1393,7 @@ export default function App() {
       const d = parseDate(row["Data"]);
       if (isDateInRangeLocal(d)) {
         const rStr = row["Pedidos Pagos"] || "0";
-        const rNum = parseFloat(rStr.replace(/\./g, '').replace(',', '.'));
+        const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(rNum)) revenue += rNum;
 
         const pStr = row["Quantidade Pedidos"] || "0";
@@ -1406,7 +1406,7 @@ export default function App() {
       const d = parseDate(row["Data"]);
       if (isDateInRangeLocal(d)) {
         const gStr = row["Investimento"] || row["Gastos"] || "0";
-        const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
+        const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(g)) {
           inv += g;
           metaInv += g;
@@ -1447,7 +1447,7 @@ export default function App() {
         }
 
         const revStr = row["Faturamento Meta Ads"] || row["Valor de conversão de compras no site"] || row["Faturamento"] || "0";
-        const rev = parseFloat(revStr.replace(/\./g, '').replace(',', '.'));
+        const rev = parseFloat(revStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(rev)) {
           metaRevenue += rev;
         }
@@ -1458,23 +1458,23 @@ export default function App() {
       const d = parseDate(row["Data"]);
       if (isDateInRangeLocal(d)) {
         const gStr = row["Investimento"] || row["Gastos"] || "0";
-        const g = parseFloat(gStr.replace(/\./g, '').replace(',', '.'));
+        const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(g)) inv += g;
 
         const cStr = row["Cliques no Link"] || row["Cliques"] || "0";
-        const cNum = parseFloat(cStr.replace(/\./g, '').replace(',', '.'));
+        const cNum = parseFloat(cStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(cNum)) clicks += cNum;
 
         const vStr = row["Visualizações de página de destino"] || row["Visualizações de Página"] || "0";
-        const vNum = parseFloat(vStr.replace(/\./g, '').replace(',', '.'));
+        const vNum = parseFloat(vStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(vNum)) views += vNum;
 
         const cartStr = row["Adições ao carrinho"] || row["Adições ao Carrinho"] || "0";
-        const cartNum = parseFloat(cartStr.replace(/\./g, '').replace(',', '.'));
+        const cartNum = parseFloat(cartStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(cartNum)) carts += cartNum;
 
         const chkStr = row["Finalizações de compra iniciadas"] || row["Checkout"] || "0";
-        const chkNum = parseFloat(chkStr.replace(/\./g, '').replace(',', '.'));
+        const chkNum = parseFloat(chkStr.replace(/[^\d,-]/g, '').replace(',', '.'));
         if (!isNaN(chkNum)) checkouts += chkNum;
       }
     });
