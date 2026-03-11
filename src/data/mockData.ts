@@ -9,7 +9,7 @@ export const companies = [
   { id: "cartao-de-visita", name: "Cartão de Visita" },
   { id: "nordeste-graf", name: "Nordeste Graf" },
   { id: "orion-olimpia", name: "Órion Olímpia" },
-  { id: "Clinvet", name: "Clinvet BSB", type: "whatsapp", spreadsheetId: "1KoDWDJ19pN4hNq7YCWNzkhB1VrabCLGLJvIBfAeS9Nk", sheetTab: "Dashboard" },
+  { id: "clinvet", name: "Clinvet BSB", type: "whatsapp", spreadsheetId: "1KoDWDJ19pN4hNq7YCWNzkhB1VrabCLGLJvIBfAeS9Nk", sheetTab: "Dashboard" },
 ];
 
 export const performanceMetrics: Record<string, any> = {
