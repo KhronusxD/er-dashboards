@@ -1,17 +1,5 @@
-export const companies = [
-  { id: "atual-card", name: "Atual Card" },
-  { id: "fabrica-do-livro", name: "Fábrica do Livro", sheetGid: "1616676463", trafficGid: "1328007383", googleAdsGid: "512858276" },
-  { id: "grafica-cores", name: "Gráfica Cores" },
-  { id: "cartoes-mais-barato", name: "Cartões Mais Barato" },
-  { id: "paulista-cartoes", name: "Paulista Cartões" },
-  { id: "imprima-rapido", name: "Imprima Rápido" },
-  { id: "grafica-das-graficas", name: "Gráfica das Gráficas" },
-  { id: "cartao-de-visita", name: "Cartão de Visita" },
-  { id: "nordeste-graf", name: "Nordeste Graf" },
-  { id: "orion-olimpia", name: "Órion Olímpia" },
-  { id: "clinvet", name: "Clinvet BSB", type: "whatsapp", spreadsheetId: "1KoDWDJ19pN4hNq7YCWNzkhB1VrabCLGLJvIBfAeS9Nk", sheetTab: "Dashboard" },
-  { id: "itv-manaus", name: "ITV Manaus", type: "itv-manaus", spreadsheetId: "1JRVbCtv4ma2m6UK-0KJ5Xaa0yrPxS2j-09ghZv4huEE", sheetTab: "Lista", trafficTab: "Meta Ads", googleAdsTab: "Google Ads" },
-];
+export const companies: any[] = [];
+
 
 export const performanceMetrics: Record<string, any> = {
   "atual-card": {

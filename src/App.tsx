@@ -101,6 +101,162 @@ const VariationBadge = ({ current, previous, inverse = false, neutral = false }:
   );
 };
 
+const AdminPanel = ({ dbCompanies, fetchCompanies }: any) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState<any>({
+    id: '', name: '', type: 'default', spreadsheet_id: '',
+    sheet_tab: '', traffic_tab: '', google_ads_tab: '',
+    sheet_gid: '', traffic_gid: '', google_ads_gid: ''
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const { error } = await supabase.from('companies').upsert({
+        ...formData,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'id' });
+      
+      if (error) throw error;
+      alert("Cliente salvo com sucesso!");
+      setIsEditing(false);
+      fetchCompanies();
+    } catch (err: any) {
+      alert("Erro ao salvar: " + err.message);
+    }
+  };
+
+  const deleteCompany = async (id: string) => {
+    if (!window.confirm("Certeza que deseja excluir?")) return;
+    try {
+      const { error } = await supabase.from('companies').delete().eq('id', id);
+      if (error) throw error;
+      fetchCompanies();
+    } catch (err: any) {
+      alert("Erro ao excluir: " + err.message);
+    }
+  }
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-neutral-200 shadow-sm">
+        <h2 className="text-lg font-semibold text-neutral-800">Gerenciar Clientes</h2>
+        <button 
+          onClick={() => {
+            setFormData({id: '', name: '', type: 'default', spreadsheet_id: '', sheet_tab: '', traffic_tab: '', google_ads_tab: '', sheet_gid: '', traffic_gid: '', google_ads_gid: ''});
+            setIsEditing(true);
+          }}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+        >
+          Adicionar Cliente
+        </button>
+      </div>
+
+      {isEditing ? (
+        <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm">
+          <h3 className="text-lg font-medium mb-4">{formData.id ? 'Editar Cliente' : 'Novo Cliente'}</h3>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">ID (identificador único)</label>
+                <input required disabled={!!formData.id && formData.id !== ''} value={formData.id} onChange={e => setFormData({...formData, id: e.target.value.toLowerCase().replace(/\s+/g, '-')})} className="w-full border rounded-lg p-2" placeholder="ex: clinvet-bsb" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Nome de Exibição</label>
+                <input required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full border rounded-lg p-2" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Tipo de Negócio</label>
+                <select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} className="w-full border rounded-lg p-2">
+                  <option value="default">Padrão</option>
+                  <option value="whatsapp">WhatsApp (Clinvet)</option>
+                  <option value="itv-manaus">ITV Manaus</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Spreadsheet ID (Planilha Principal)</label>
+                <input value={formData.spreadsheet_id} onChange={e => setFormData({...formData, spreadsheet_id: e.target.value})} className="w-full border rounded-lg p-2" />
+              </div>
+              
+              <div className="md:col-span-2 mt-4"><h4 className="font-semibold text-neutral-700 border-b pb-2">Campos Específicos (Opcional - Customizar Abas)</h4></div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1">Nome da Aba (Faturamento)</label>
+                <input value={formData.sheet_tab} onChange={e => setFormData({...formData, sheet_tab: e.target.value})} className="w-full border rounded-lg p-2" placeholder="Deixe em branco para usar o nome do cliente" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Nome da Aba (Meta Ads)</label>
+                <input value={formData.traffic_tab} onChange={e => setFormData({...formData, traffic_tab: e.target.value})} className="w-full border rounded-lg p-2" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Nome da Aba (Google Ads)</label>
+                <input value={formData.google_ads_tab} onChange={e => setFormData({...formData, google_ads_tab: e.target.value})} className="w-full border rounded-lg p-2" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Geração Anterior GID (Faturamento)</label>
+                <input value={formData.sheet_gid} onChange={e => setFormData({...formData, sheet_gid: e.target.value})} className="w-full border rounded-lg p-2" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Geração Anterior GID (Meta)</label>
+                <input value={formData.traffic_gid} onChange={e => setFormData({...formData, traffic_gid: e.target.value})} className="w-full border rounded-lg p-2" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Geração Anterior GID (Google)</label>
+                <input value={formData.google_ads_gid} onChange={e => setFormData({...formData, google_ads_gid: e.target.value})} className="w-full border rounded-lg p-2" />
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end mt-4">
+              <button type="button" onClick={() => setIsEditing(false)} className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 rounded-lg">Cancelar</button>
+              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg">Salvar Cliente</button>
+            </div>
+          </form>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-neutral-50 text-neutral-500">
+              <tr>
+                <th className="px-6 py-3 font-medium">ID</th>
+                <th className="px-6 py-3 font-medium">Nome</th>
+                <th className="px-6 py-3 font-medium">Tipo</th>
+                <th className="px-6 py-3 font-medium text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {dbCompanies.map((c: any) => (
+                <tr key={c.id} className="hover:bg-neutral-50">
+                  <td className="px-6 py-4 font-mono text-xs">{c.id}</td>
+                  <td className="px-6 py-4 font-medium text-neutral-900">{c.name}</td>
+                  <td className="px-6 py-4">
+                    <span className="px-2 py-1 bg-neutral-100 text-neutral-600 rounded text-xs">{c.type || 'default'}</span>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <button onClick={() => {
+                        setFormData({
+                            id: c.id, name: c.name, type: c.type || 'default', 
+                            spreadsheet_id: c.spreadsheetId || '', sheet_tab: c.sheetTab || '', 
+                            traffic_tab: c.trafficTab || '', google_ads_tab: c.googleAdsTab || '', 
+                            sheet_gid: c.sheetGid || '', traffic_gid: c.trafficGid || '', google_ads_gid: c.googleAdsGid || ''
+                        });
+                        setIsEditing(true);
+                    }} className="text-indigo-600 hover:text-indigo-900 mr-3">Editar</button>
+                    <button onClick={() => deleteCompany(c.id)} className="text-red-600 hover:text-red-900">Excluir</button>
+                  </td>
+                </tr>
+              ))}
+              {dbCompanies.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-neutral-500">A tabela de clientes ainda está vazia ou não foi criada.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
@@ -108,8 +264,11 @@ export default function App() {
   const [loginError, setLoginError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
+  const [dbCompanies, setDbCompanies] = useState<any[]>([]);
+  const [isLoadingCompanies, setIsLoadingCompanies] = useState(true);
+
   const [allowedCompanyIds, setAllowedCompanyIds] = useState<string[]>([]);
-  const [selectedCompany, setSelectedCompany] = useState(companies[0].id);
+  const [selectedCompany, setSelectedCompany] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
 
   // Daily Chart Settings
@@ -248,53 +407,77 @@ export default function App() {
   }, [selectedCompany, isAuthenticated, allowedCompanyIds]);
 
   // Check Supabase Auth Session on mount
-  useEffect(() => {
-    const loadUserAccess = async (email: string) => {
-      try {
-        const { data, error } = await supabase
-          .from('user_access')
-          .select('company_id')
-          .eq('user_email', email);
+  const fetchCompaniesAndAccess = async (email: string) => {
+    setIsLoadingCompanies(true);
+    try {
+      const { data: compData, error: compError } = await supabase.from('companies').select('*');
+      const loadedCompanies = compData || [];
+      const mappedCompanies = loadedCompanies.map(c => ({
+        id: c.id,
+        name: c.name,
+        type: c.type,
+        sheetGid: c.sheet_gid,
+        trafficGid: c.traffic_gid,
+        googleAdsGid: c.google_ads_gid,
+        spreadsheetId: c.spreadsheet_id,
+        sheetTab: c.sheet_tab,
+        trafficTab: c.traffic_tab,
+        googleAdsTab: c.google_ads_tab
+      }));
+      setDbCompanies(mappedCompanies);
 
-        if (error || !data || data.length === 0) {
-          console.error("Erro ao buscar acesso do usuário ou usuário sem acesso:", error);
-          setAllowedCompanyIds(['NONE']);
-          return;
-        }
+      const { data, error } = await supabase
+        .from('user_access')
+        .select('company_id')
+        .eq('user_email', email);
 
-        const ids = data.map((d: any) => {
-          if (d.company_id === 'ALL') return 'ALL';
-
-          const dbId = d.company_id.trim().toLowerCase();
-          const exactMatch = companies.find(c => c.id.toLowerCase() === dbId);
-          if (exactMatch) return exactMatch.id;
-
-          return d.company_id.trim().toLowerCase().replace(/_/g, '-');
-        });
-        if (ids.includes('ALL')) {
-          setAllowedCompanyIds(companies.map(c => c.id));
-        } else {
-          setAllowedCompanyIds(ids);
-          setSelectedCompany(prev => {
-            if (ids.length > 0 && !ids.includes(prev)) {
-              return ids[0];
-            }
-            return prev;
-          });
-        }
-      } catch (err) {
-        console.error("Erro inesperado ao buscar acesso:", err);
+      if (error || !data || data.length === 0) {
+        console.error("Erro ao buscar acesso do usuário ou usuário sem acesso:", error);
         setAllowedCompanyIds(['NONE']);
+        setIsLoadingCompanies(false);
+        return;
       }
-    };
+
+      const ids = data.map((d: any) => {
+        if (d.company_id === 'ALL') return 'ALL';
+        const dbId = d.company_id.trim().toLowerCase();
+        const exactMatch = mappedCompanies.find(c => c.id.toLowerCase() === dbId);
+        if (exactMatch) return exactMatch.id;
+        return d.company_id.trim().toLowerCase().replace(/_/g, '-');
+      });
+
+      if (ids.includes('ALL')) {
+        setAllowedCompanyIds(mappedCompanies.map(c => c.id));
+      } else {
+        setAllowedCompanyIds(ids);
+        setSelectedCompany(prev => {
+          if (ids.length > 0 && !ids.includes(prev)) {
+            return ids[0];
+          }
+          return prev;
+        });
+      }
+    } catch (err) {
+      console.error("Erro inesperado ao buscar acesso:", err);
+      setAllowedCompanyIds(['NONE']);
+    } finally {
+      setIsLoadingCompanies(false);
+    }
+  };
+
+  useEffect(() => {
 
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         setIsAuthenticated(true);
         if (session.user?.email) {
-          loadUserAccess(session.user.email);
+          fetchCompaniesAndAccess(session.user.email);
+        } else {
+          setIsLoadingCompanies(false);
         }
+      } else {
+        setIsLoadingCompanies(false);
       }
     };
 
@@ -304,9 +487,10 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAuthenticated(!!session);
       if (session?.user?.email) {
-        loadUserAccess(session.user.email);
+        fetchCompaniesAndAccess(session.user.email);
       } else {
         setAllowedCompanyIds(['NONE']);
+        setIsLoadingCompanies(false);
       }
     });
 
@@ -323,11 +507,11 @@ export default function App() {
     setIsFetchingGoogleAds(true);
     setGoogleAdsError(null);
 
-    const currentCompanyObj = companies.find((c) => c.id === selectedCompany);
+    const currentCompanyObj = dbCompanies.find((c) => c.id === selectedCompany);
     const tabName = currentCompanyObj?.name || "";
-    const hasSheetGid = "sheetGid" in (currentCompanyObj || {});
-    const hasTrafficGid = "trafficGid" in (currentCompanyObj || {});
-    const hasGoogleAdsGid = "googleAdsGid" in (currentCompanyObj || {});
+    const hasSheetGid = !!(currentCompanyObj?.sheetGid);
+    const hasTrafficGid = !!(currentCompanyObj?.trafficGid);
+    const hasGoogleAdsGid = !!(currentCompanyObj?.googleAdsGid);
 
     const isWhatsapp = (currentCompanyObj as any)?.type === "whatsapp";
     const isItvManaus = (currentCompanyObj as any)?.type === "itv-manaus";
@@ -653,6 +837,22 @@ export default function App() {
     }
   };
 
+  const parseNumberStr = (str: string | number | undefined | null) => {
+    if (!str) return 0;
+    const s = String(str).trim();
+    if (s.includes(',') && s.includes('.')) {
+      if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+        return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+      } else {
+        return parseFloat(s.replace(/,/g, ''));
+      }
+    } else if (s.includes(',')) {
+      return parseFloat(s.replace(',', '.'));
+    } else {
+      return parseFloat(s.replace(/[^\d.-]/g, ''));
+    }
+  };
+
   const handleMetricChange = async (moduleName: string, metricKey: string, field: 'value' | 'good' | 'excellent', newValue: string) => {
     const numValue = Number(newValue);
     if (isNaN(numValue)) return;
@@ -688,7 +888,7 @@ export default function App() {
     }
   };
 
-  const currentCompany = companies.find((c) => c.id === selectedCompany);
+  const currentCompany = dbCompanies.find((c) => c.id === selectedCompany);
   const mockMetrics =
     performanceMetrics[selectedCompany] || performanceMetrics["atual-card"];
 
@@ -934,7 +1134,7 @@ export default function App() {
 
   filteredData.forEach(row => {
     const revenueStr = row["Pedidos Pagos"] || "0";
-    const revenueNum = parseFloat(revenueStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+    const revenueNum = parseNumberStr(revenueStr);
     if (!isNaN(revenueNum)) computedMetrics.revenue += revenueNum;
 
     const purchasesStr = row["Quantidade Pedidos"] || "0";
@@ -956,7 +1156,7 @@ export default function App() {
 
   previousFilteredData.forEach(row => {
     const revenueStr = row["Pedidos Pagos"] || "0";
-    const revenueNum = parseFloat(revenueStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+    const revenueNum = parseNumberStr(revenueStr);
     if (!isNaN(revenueNum)) computedMetrics.prevRevenue += revenueNum;
 
     const purchasesStr = row["Quantidade Pedidos"] || "0";
@@ -1015,7 +1215,7 @@ export default function App() {
       if (d) {
         const dayData = getOrCreateDay(d);
         const rStr = row["Pedidos Pagos"] || "0";
-        const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const rNum = parseNumberStr(rStr);
         if (!isNaN(rNum)) dayData.totalRevenue += rNum;
       }
     });
@@ -1027,11 +1227,11 @@ export default function App() {
         const dayData = getOrCreateDay(d);
 
         const gStr = row["Investimento"] || row["Gastos"] || "0";
-        const gNum = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const gNum = parseNumberStr(gStr);
         if (!isNaN(gNum)) dayData.metaCost += gNum;
 
         const rStr = row["Faturamento Meta Ads"] || "0";
-        const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const rNum = parseNumberStr(rStr);
         if (!isNaN(rNum)) dayData.metaRevenue += rNum;
       }
     });
@@ -1043,11 +1243,11 @@ export default function App() {
         const dayData = getOrCreateDay(d);
 
         const gStr = row["Investimento"] || row["Gastos"] || "0";
-        const gNum = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const gNum = parseNumberStr(gStr);
         if (!isNaN(gNum)) dayData.googleCost += gNum;
 
         const rStr = row["Faturamento Google Ads"] || row["Valor da conversão"] || "0";
-        const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const rNum = parseNumberStr(rStr);
         if (!isNaN(rNum)) dayData.googleRevenue += rNum;
       }
     });
@@ -1084,11 +1284,11 @@ export default function App() {
       if (!rowDate) return;
 
       const gStr = row["Investimento"] || row["Gastos"] || "0";
-      const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+      const g = parseNumberStr(gStr);
       const pStr = row["Compras Meta"] || "0";
-      const p = parseFloat(pStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+      const p = parseNumberStr(pStr);
       const fStr = row["Faturamento Meta Ads"] || "0";
-      const f = parseFloat(fStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+      const f = parseNumberStr(fStr);
 
       if (isDateInRange(rowDate)) {
         if (!isNaN(g)) investimentoMeta += g;
@@ -1106,11 +1306,11 @@ export default function App() {
       if (!rowDate) return;
 
       const gStr = row["Investimento"] || row["Gastos"] || "0";
-      const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+      const g = parseNumberStr(gStr);
       const pStr = row["Compras Meta"] || row["Conversões"] || "0";
-      const p = parseFloat(pStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+      const p = parseNumberStr(pStr);
       const fStr = row["Faturamento Google Ads"] || row["Valor da conversão"] || "0";
-      const f = parseFloat(fStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+      const f = parseNumberStr(fStr);
 
       if (isDateInRange(rowDate)) {
         if (!isNaN(g)) investimentoGoogle += g;
@@ -1194,13 +1394,13 @@ export default function App() {
         const clicks = row['Cliques no Link'] || row['Cliques'] || "0";
         const conversions = row['Compras Meta'] || row['Conversões'] || "0";
 
-        const valClicks = parseFloat(clicks.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const valClicks = parseNumberStr(clicks);
         if (!isNaN(valClicks)) {
           google['Cliques no Link'] += valClicks;
           all['Cliques no Link'] += valClicks;
         }
 
-        const valConversions = parseFloat(conversions.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const valConversions = parseNumberStr(conversions);
         if (!isNaN(valConversions)) {
           google['Compras Meta'] += valConversions;
           all['Compras Meta'] += valConversions;
@@ -1239,8 +1439,8 @@ export default function App() {
   }
 
   // Calculate new Metrics (Leads, CAC, CPL/CPA)
-  const isWhatsapp = (companies.find(c => c.id === selectedCompany) as any)?.type === "whatsapp";
-  const isItvManaus = (companies.find(c => c.id === selectedCompany) as any)?.type === "itv-manaus";
+  const isWhatsapp = (dbCompanies.find(c => c.id === selectedCompany) as any)?.type === "whatsapp";
+  const isItvManaus = (dbCompanies.find(c => c.id === selectedCompany) as any)?.type === "itv-manaus";
 
   const totalLeads = useMemo(() => {
     let leads = 0;
@@ -1389,7 +1589,7 @@ export default function App() {
         const d = parseDate(row["Data"]);
         if (isDateInRangeLocal(d)) {
           const rStr = row["Pedidos Pagos"] || "0";
-          const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+          const rNum = parseNumberStr(rStr);
           if (!isNaN(rNum)) revenue += rNum;
           const pStr = row["Quantidade Pedidos"] || "0";
           const pNum = parseInt(pStr, 10);
@@ -1401,15 +1601,15 @@ export default function App() {
         const d = parseDate(row["Data"]);
         if (isDateInRangeLocal(d)) {
           const gStr = row["Investimento"] || row["Gastos"] || "0";
-          const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+          const g = parseNumberStr(gStr);
           if (!isNaN(g)) invMeta += g;
 
           const pStr = row["Compras Meta"] || "0";
-          const p = parseFloat(pStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+          const p = parseNumberStr(pStr);
           if (!isNaN(p)) metaPurchases += p;
 
           const fStr = row["Faturamento Meta Ads"] || "0";
-          const f = parseFloat(fStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+          const f = parseNumberStr(fStr);
           if (!isNaN(f)) metaRevenue += f;
         }
       });
@@ -1418,15 +1618,15 @@ export default function App() {
         const d = parseDate(row["Data"]);
         if (isDateInRangeLocal(d)) {
           const gStr = row["Investimento"] || row["Gastos"] || "0";
-          const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+          const g = parseNumberStr(gStr);
           if (!isNaN(g)) invGoogle += g;
 
           const pStr = row["Compras Meta"] || row["Conversões"] || "0";
-          const p = parseFloat(pStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+          const p = parseNumberStr(pStr);
           if (!isNaN(p)) googlePurchases += p;
 
           const fStr = row["Faturamento Google Ads"] || row["Valor da conversão"] || "0";
-          const f = parseFloat(fStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+          const f = parseNumberStr(fStr);
           if (!isNaN(f)) googleRevenue += f;
         }
       });
@@ -1490,7 +1690,7 @@ export default function App() {
       const d = parseDate(row["Data"]);
       if (isDateInRangeLocal(d)) {
         const rStr = row["Pedidos Pagos"] || "0";
-        const rNum = parseFloat(rStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const rNum = parseNumberStr(rStr);
         if (!isNaN(rNum)) revenue += rNum;
 
         const pStr = row["Quantidade Pedidos"] || "0";
@@ -1503,7 +1703,7 @@ export default function App() {
       const d = parseDate(row["Data"]);
       if (isDateInRangeLocal(d)) {
         const gStr = row["Investimento"] || row["Gastos"] || "0";
-        const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const g = parseNumberStr(gStr);
         if (!isNaN(g)) {
           inv += g;
           metaInv += g;
@@ -1544,7 +1744,7 @@ export default function App() {
         }
 
         const revStr = row["Faturamento Meta Ads"] || row["Valor de conversão de compras no site"] || row["Faturamento"] || "0";
-        const rev = parseFloat(revStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const rev = parseNumberStr(revStr);
         if (!isNaN(rev)) {
           metaRevenue += rev;
         }
@@ -1555,23 +1755,23 @@ export default function App() {
       const d = parseDate(row["Data"]);
       if (isDateInRangeLocal(d)) {
         const gStr = row["Investimento"] || row["Gastos"] || "0";
-        const g = parseFloat(gStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const g = parseNumberStr(gStr);
         if (!isNaN(g)) inv += g;
 
         const cStr = row["Cliques no Link"] || row["Cliques"] || "0";
-        const cNum = parseFloat(cStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const cNum = parseNumberStr(cStr);
         if (!isNaN(cNum)) clicks += cNum;
 
         const vStr = row["Visualizações de página de destino"] || row["Visualizações de Página"] || "0";
-        const vNum = parseFloat(vStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const vNum = parseNumberStr(vStr);
         if (!isNaN(vNum)) views += vNum;
 
         const cartStr = row["Adições ao carrinho"] || row["Adições ao Carrinho"] || "0";
-        const cartNum = parseFloat(cartStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const cartNum = parseNumberStr(cartStr);
         if (!isNaN(cartNum)) carts += cartNum;
 
         const chkStr = row["Finalizações de compra iniciadas"] || row["Checkout"] || "0";
-        const chkNum = parseFloat(chkStr.replace(/[^\d,-]/g, '').replace(',', '.'));
+        const chkNum = parseNumberStr(chkStr);
         if (!isNaN(chkNum)) checkouts += chkNum;
       }
     });
@@ -1620,6 +1820,14 @@ export default function App() {
   // Global Presumed Revenue: (Total Base - Meta Base) + Simulated Meta Revenue
   const simulatedGlobalRevenue = simBaseMetrics ?
     ((simBaseMetrics.revenue - (simBaseMetrics.metaRevenue || 0)) + simulatedRevenue) : 0;
+
+  if (isLoadingCompanies && isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-neutral-900 flex items-center justify-center p-4">
+        <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return (
@@ -1697,7 +1905,7 @@ export default function App() {
                 disabled={allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0}
                 className={`appearance-none bg-neutral-100 border border-neutral-200 text-neutral-800 py-2 pl-4 pr-10 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0 ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
               >
-                {companies.filter(c => allowedCompanyIds.includes('ALL') || allowedCompanyIds.includes(c.id)).map((company) => (
+                {dbCompanies.filter(c => allowedCompanyIds.includes('ALL') || allowedCompanyIds.includes(c.id)).map((company) => (
                   <option key={company.id} value={company.id}>
                     {company.name}
                   </option>
@@ -1757,6 +1965,11 @@ export default function App() {
                 label: "Simulador",
                 icon: <Lightbulb className="w-4 h-4" />,
               },
+              ...(allowedCompanyIds.length === dbCompanies.length || allowedCompanyIds.includes('ALL') ? [{
+                id: "admin",
+                label: "Gerenciar Clientes",
+                icon: <Settings className="w-4 h-4" />,
+              }] : []),
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -1776,6 +1989,10 @@ export default function App() {
         {/* Main Content Area */}
         <main className="flex-1 min-w-0">
           {/* Tab Content */}
+          {activeTab === "admin" && (
+            <AdminPanel dbCompanies={dbCompanies} fetchCompanies={() => supabase.auth.getSession().then(({data:{session}}) => session?.user?.email && fetchCompaniesAndAccess(session.user.email))} />
+          )}
+
           {activeTab === "overview" && (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
               {/* Overview Header with Date Picker */}
@@ -1870,6 +2087,20 @@ export default function App() {
                       isCurrency={true}
                       icon={<TrendingUp className="w-5 h-5 text-indigo-600" />}
                       inverseChange
+                      subtitle={
+                        <div className="flex flex-col gap-1 mt-1 text-[10px] sm:text-xs">
+                          <div className="flex items-center gap-1">
+                            <span className="text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                              Meta: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(computedTrafficMetrics.investimentoMeta)} ({computedTrafficMetrics.investimentoTotal > 0 ? ((computedTrafficMetrics.investimentoMeta / computedTrafficMetrics.investimentoTotal) * 100).toFixed(1) : 0}%)
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-emerald-600 font-medium bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                              Google: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(computedTrafficMetrics.investimentoGoogle)} ({computedTrafficMetrics.investimentoTotal > 0 ? ((computedTrafficMetrics.investimentoGoogle / computedTrafficMetrics.investimentoTotal) * 100).toFixed(1) : 0}%)
+                            </span>
+                          </div>
+                        </div>
+                      }
                     />
                     <MetricCard
                       title="Leads Totais"
@@ -1878,6 +2109,20 @@ export default function App() {
                       previousAmount={prevTotalLeads}
                       isCurrency={false}
                       icon={<Users className="w-5 h-5 text-purple-600" />}
+                      subtitle={
+                        <div className="flex flex-col gap-1 mt-1 text-[10px] sm:text-xs">
+                          <div className="flex items-center gap-1">
+                            <span className="text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                              Meta: {funnelDataSources.meta['Adições no Carrinho']} ({totalLeads > 0 ? ((funnelDataSources.meta['Adições no Carrinho'] / totalLeads) * 100).toFixed(1) : 0}%)
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-emerald-600 font-medium bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                              Google: {funnelDataSources.google['Compras Meta']} ({totalLeads > 0 ? ((funnelDataSources.google['Compras Meta'] / totalLeads) * 100).toFixed(1) : 0}%)
+                            </span>
+                          </div>
+                        </div>
+                      }
                     />
                     <MetricCard
                       title="Faturamento"
@@ -1886,6 +2131,20 @@ export default function App() {
                       previousAmount={computedMetrics.prevRevenue}
                       isCurrency={true}
                       icon={<DollarSign className="w-5 h-5 text-emerald-600" />}
+                      subtitle={
+                        <div className="flex flex-col gap-1 mt-1 text-[10px] sm:text-xs">
+                          <div className="flex items-center gap-1">
+                            <span className="text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                              Meta: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(computedTrafficMetrics.faturamentoMeta)} ({computedMetrics.revenue > 0 ? ((computedTrafficMetrics.faturamentoMeta / computedMetrics.revenue) * 100).toFixed(1) : 0}%)
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-emerald-600 font-medium bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                              Google: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(computedTrafficMetrics.faturamentoGoogle)} ({computedMetrics.revenue > 0 ? ((computedTrafficMetrics.faturamentoGoogle / computedMetrics.revenue) * 100).toFixed(1) : 0}%)
+                            </span>
+                          </div>
+                        </div>
+                      }
                     />
                   </>
                 ) : (
