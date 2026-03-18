@@ -1183,11 +1183,11 @@ export default function App() {
     checkSession();
 
     // Listen to auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setIsAuthenticated(!!session);
-      if (session?.user?.email) {
+      if (event === 'SIGNED_IN' && session?.user?.email) {
         fetchCompaniesAndAccess(session.user.email);
-      } else {
+      } else if (!session) {
         setAllowedCompanyIds(['NONE']);
         setIsLoadingCompanies(false);
       }
