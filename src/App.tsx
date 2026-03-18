@@ -101,156 +101,441 @@ const VariationBadge = ({ current, previous, inverse = false, neutral = false }:
   );
 };
 
-const AdminPanel = ({ dbCompanies, fetchCompanies }: any) => {
-  const [isEditing, setIsEditing] = useState(false);
+const AdminPanel = ({ dbCompanies, fetchCompanies }: { dbCompanies: any[], fetchCompanies: () => void }) => {
+  const [adminTab, setAdminTab] = useState<'clients' | 'access'>('clients');
+
+  // --- Clients ---
+  const [isEditingCompany, setIsEditingCompany] = useState(false);
   const [formData, setFormData] = useState<any>({
     id: '', name: '', type: 'default', spreadsheet_id: '',
     sheet_tab: '', traffic_tab: '', google_ads_tab: '',
     sheet_gid: '', traffic_gid: '', google_ads_gid: ''
   });
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [companyFeedback, setCompanyFeedback] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
+
+  const showFeedback = (type: 'success' | 'error', msg: string) => {
+    setCompanyFeedback({ type, msg });
+    setTimeout(() => setCompanyFeedback(null), 4000);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
     try {
-      const { error } = await supabase.from('companies').upsert({
-        ...formData,
+      const payload: any = {
+        id: formData.id,
+        name: formData.name,
+        type: formData.type,
+        spreadsheet_id: formData.spreadsheet_id || null,
+        sheet_tab: formData.sheet_tab || null,
+        traffic_tab: formData.traffic_tab || null,
+        google_ads_tab: formData.google_ads_tab || null,
+        sheet_gid: formData.sheet_gid ? parseInt(formData.sheet_gid) : null,
+        traffic_gid: formData.traffic_gid ? parseInt(formData.traffic_gid) : null,
+        google_ads_gid: formData.google_ads_gid ? parseInt(formData.google_ads_gid) : null,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'id' });
-      
+      };
+      const { error } = await supabase.from('companies').upsert(payload, { onConflict: 'id' });
       if (error) throw error;
-      alert("Cliente salvo com sucesso!");
-      setIsEditing(false);
+      showFeedback('success', `Cliente "${formData.name}" salvo com sucesso!`);
+      setIsEditingCompany(false);
       fetchCompanies();
     } catch (err: any) {
-      alert("Erro ao salvar: " + err.message);
+      showFeedback('error', 'Erro ao salvar: ' + err.message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const deleteCompany = async (id: string) => {
-    if (!window.confirm("Certeza que deseja excluir?")) return;
+  const deleteCompany = async (id: string, name: string) => {
+    if (!window.confirm(`Tem certeza que deseja excluir "${name}"?`)) return;
+    setIsDeleting(id);
     try {
       const { error } = await supabase.from('companies').delete().eq('id', id);
       if (error) throw error;
+      showFeedback('success', `Cliente "${name}" excluído.`);
       fetchCompanies();
     } catch (err: any) {
-      alert("Erro ao excluir: " + err.message);
+      showFeedback('error', 'Erro ao excluir: ' + err.message);
+    } finally {
+      setIsDeleting(null);
     }
-  }
+  };
+
+  const openNewForm = () => {
+    setFormData({ id: '', name: '', type: 'default', spreadsheet_id: '', sheet_tab: '', traffic_tab: '', google_ads_tab: '', sheet_gid: '', traffic_gid: '', google_ads_gid: '' });
+    setIsEditingCompany(true);
+  };
+
+  const openEditForm = (c: any) => {
+    setFormData({
+      id: c.id, name: c.name, type: c.type || 'default',
+      spreadsheet_id: c.spreadsheetId || '', sheet_tab: c.sheetTab || '',
+      traffic_tab: c.trafficTab || '', google_ads_tab: c.googleAdsTab || '',
+      sheet_gid: c.sheetGid || '', traffic_gid: c.trafficGid || '', google_ads_gid: c.googleAdsGid || ''
+    });
+    setIsEditingCompany(true);
+  };
+
+  // --- User Access ---
+  const [userAccessList, setUserAccessList] = useState<any[]>([]);
+  const [isLoadingAccess, setIsLoadingAccess] = useState(false);
+  const [accessForm, setAccessForm] = useState({ email: '', company_id: '' });
+  const [isSavingAccess, setIsSavingAccess] = useState(false);
+  const [isDeletingAccess, setIsDeletingAccess] = useState<string | null>(null);
+  const [accessFeedback, setAccessFeedback] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
+
+  const showAccessFeedback = (type: 'success' | 'error', msg: string) => {
+    setAccessFeedback({ type, msg });
+    setTimeout(() => setAccessFeedback(null), 4000);
+  };
+
+  const fetchUserAccess = async () => {
+    setIsLoadingAccess(true);
+    const { data, error } = await supabase.from('user_access').select('*').order('user_email');
+    if (!error) setUserAccessList(data || []);
+    setIsLoadingAccess(false);
+  };
+
+  useEffect(() => {
+    if (adminTab === 'access') fetchUserAccess();
+  }, [adminTab]);
+
+  const handleAddAccess = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!accessForm.email || !accessForm.company_id) return;
+    setIsSavingAccess(true);
+    try {
+      const { error } = await supabase.from('user_access').insert({
+        user_email: accessForm.email.toLowerCase().trim(),
+        company_id: accessForm.company_id
+      });
+      if (error) throw error;
+      showAccessFeedback('success', `Acesso adicionado para ${accessForm.email}.`);
+      setAccessForm({ email: '', company_id: '' });
+      fetchUserAccess();
+    } catch (err: any) {
+      showAccessFeedback('error', 'Erro ao adicionar acesso: ' + err.message);
+    } finally {
+      setIsSavingAccess(false);
+    }
+  };
+
+  const deleteAccess = async (userEmail: string, companyId: string) => {
+    const key = `${userEmail}::${companyId}`;
+    setIsDeletingAccess(key);
+    try {
+      const { error } = await supabase.from('user_access').delete()
+        .eq('user_email', userEmail)
+        .eq('company_id', companyId);
+      if (error) throw error;
+      showAccessFeedback('success', 'Acesso removido.');
+      fetchUserAccess();
+    } catch (err: any) {
+      showAccessFeedback('error', 'Erro ao remover: ' + err.message);
+    } finally {
+      setIsDeletingAccess(null);
+    }
+  };
+
+  const typeLabel = (type: string) => ({ 'whatsapp': 'WhatsApp / Leads', 'itv-manaus': 'ITV Manaus' }[type] || 'Padrão');
+  const typeBadgeClass = (type: string) => ({
+    'whatsapp': 'bg-green-50 text-green-700',
+    'itv-manaus': 'bg-blue-50 text-blue-700'
+  }[type] || 'bg-neutral-100 text-neutral-600');
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-neutral-200 shadow-sm">
-        <h2 className="text-lg font-semibold text-neutral-800">Gerenciar Clientes</h2>
-        <button 
-          onClick={() => {
-            setFormData({id: '', name: '', type: 'default', spreadsheet_id: '', sheet_tab: '', traffic_tab: '', google_ads_tab: '', sheet_gid: '', traffic_gid: '', google_ads_gid: ''});
-            setIsEditing(true);
-          }}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          Adicionar Cliente
-        </button>
+    <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* Header with sub-tabs */}
+      <div className="bg-white p-4 rounded-2xl border border-neutral-200 shadow-sm">
+        <h2 className="text-lg font-semibold text-neutral-800 mb-3">Administração</h2>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setAdminTab('clients'); setIsEditingCompany(false); }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${adminTab === 'clients' ? 'bg-indigo-600 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}
+          >
+            Clientes
+          </button>
+          <button
+            onClick={() => setAdminTab('access')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${adminTab === 'access' ? 'bg-indigo-600 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}
+          >
+            Acessos de Usuário
+          </button>
+        </div>
       </div>
 
-      {isEditing ? (
-        <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm">
-          <h3 className="text-lg font-medium mb-4">{formData.id ? 'Editar Cliente' : 'Novo Cliente'}</h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Feedback messages */}
+      {adminTab === 'clients' && companyFeedback && (
+        <div className={`p-3 rounded-xl text-sm font-medium border ${companyFeedback.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+          {companyFeedback.msg}
+        </div>
+      )}
+      {adminTab === 'access' && accessFeedback && (
+        <div className={`p-3 rounded-xl text-sm font-medium border ${accessFeedback.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+          {accessFeedback.msg}
+        </div>
+      )}
+
+      {/* ===== CLIENTS TAB ===== */}
+      {adminTab === 'clients' && (
+        <>
+          {isEditingCompany ? (
+            <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm">
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-base font-semibold">{formData.id ? 'Editar Cliente' : 'Novo Cliente'}</h3>
+                <button onClick={() => setIsEditingCompany(false)} className="text-neutral-400 hover:text-neutral-700 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">
+                      ID <span className="text-neutral-400 font-normal text-xs">(único, não pode ser alterado depois)</span>
+                    </label>
+                    <input
+                      required
+                      disabled={!!formData.id}
+                      value={formData.id}
+                      onChange={e => setFormData({ ...formData, id: e.target.value.toLowerCase().replace(/\s+/g, '-') })}
+                      className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm font-mono disabled:bg-neutral-50 disabled:text-neutral-500"
+                      placeholder="ex: fabrica-do-livro"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">Nome de Exibição</label>
+                    <input
+                      required
+                      value={formData.name}
+                      onChange={e => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm"
+                      placeholder="ex: Fábrica do Livro"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">Tipo / Padrão de Visualização</label>
+                    <select value={formData.type} onChange={e => setFormData({ ...formData, type: e.target.value })} className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm">
+                      <option value="default">Padrão (E-commerce)</option>
+                      <option value="whatsapp">WhatsApp / Leads</option>
+                      <option value="itv-manaus">ITV Manaus</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-neutral-700 mb-1">ID da Planilha Principal</label>
+                    <input
+                      value={formData.spreadsheet_id}
+                      onChange={e => setFormData({ ...formData, spreadsheet_id: e.target.value })}
+                      className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm font-mono"
+                      placeholder="Cole o ID da URL do Google Sheets"
+                    />
+                  </div>
+                </div>
+
+                <div className="border-t border-neutral-100 pt-4">
+                  <h4 className="text-sm font-semibold text-neutral-600 mb-3">Nomes das Abas na Planilha</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-500 mb-1">Aba — Faturamento</label>
+                      <input value={formData.sheet_tab} onChange={e => setFormData({ ...formData, sheet_tab: e.target.value })} className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm" placeholder="Nome exato da aba" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-500 mb-1">Aba — Meta Ads</label>
+                      <input value={formData.traffic_tab} onChange={e => setFormData({ ...formData, traffic_tab: e.target.value })} className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm" placeholder="Nome exato da aba" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-500 mb-1">Aba — Google Ads</label>
+                      <input value={formData.google_ads_tab} onChange={e => setFormData({ ...formData, google_ads_tab: e.target.value })} className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm" placeholder="Nome exato da aba" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-neutral-100 pt-4">
+                  <h4 className="text-sm font-semibold text-neutral-600 mb-1">
+                    GIDs <span className="font-normal text-neutral-400 text-xs">(alternativa ao nome de aba — preencher só se necessário)</span>
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-500 mb-1">GID — Faturamento</label>
+                      <input type="number" value={formData.sheet_gid} onChange={e => setFormData({ ...formData, sheet_gid: e.target.value })} className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm font-mono" placeholder="ex: 0" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-500 mb-1">GID — Meta Ads</label>
+                      <input type="number" value={formData.traffic_gid} onChange={e => setFormData({ ...formData, traffic_gid: e.target.value })} className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm font-mono" placeholder="ex: 123456789" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-500 mb-1">GID — Google Ads</label>
+                      <input type="number" value={formData.google_ads_gid} onChange={e => setFormData({ ...formData, google_ads_gid: e.target.value })} className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm font-mono" placeholder="ex: 987654321" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 justify-end pt-2 border-t border-neutral-100">
+                  <button type="button" onClick={() => setIsEditingCompany(false)} className="px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-100 rounded-lg transition-colors">
+                    Cancelar
+                  </button>
+                  <button type="submit" disabled={isSaving} className="flex items-center gap-2 px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-60">
+                    {isSaving ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Salvando…</> : <><Save className="w-3.5 h-3.5" /> Salvar Cliente</>}
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+              <div className="flex justify-between items-center px-6 py-4 border-b border-neutral-100">
+                <span className="text-sm text-neutral-500">{dbCompanies.length} cliente{dbCompanies.length !== 1 ? 's' : ''} cadastrado{dbCompanies.length !== 1 ? 's' : ''}</span>
+                <button onClick={openNewForm} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
+                  <Plus className="w-4 h-4" /> Novo Cliente
+                </button>
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-neutral-50 text-neutral-500 border-b border-neutral-100">
+                  <tr>
+                    <th className="px-6 py-3 font-medium">ID / Nome</th>
+                    <th className="px-6 py-3 font-medium">Tipo</th>
+                    <th className="px-6 py-3 font-medium">Planilha</th>
+                    <th className="px-6 py-3 font-medium text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {dbCompanies.map((c: any) => (
+                    <tr key={c.id} className="hover:bg-neutral-50">
+                      <td className="px-6 py-4">
+                        <div className="font-medium text-neutral-900">{c.name}</div>
+                        <div className="font-mono text-xs text-neutral-400 mt-0.5">{c.id}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${typeBadgeClass(c.type)}`}>
+                          {typeLabel(c.type)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        {c.spreadsheetId
+                          ? <span className="font-mono text-xs text-neutral-500" title={c.spreadsheetId}>{c.spreadsheetId.substring(0, 22)}…</span>
+                          : <span className="text-xs text-amber-500 font-medium">Não configurada</span>
+                        }
+                      </td>
+                      <td className="px-6 py-4 text-right space-x-3">
+                        <button onClick={() => openEditForm(c)} className="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+                          Editar
+                        </button>
+                        <button onClick={() => deleteCompany(c.id, c.name)} disabled={isDeleting === c.id} className="text-red-500 hover:text-red-700 text-sm font-medium disabled:opacity-40">
+                          {isDeleting === c.id ? 'Excluindo…' : 'Excluir'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {dbCompanies.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-10 text-center text-neutral-400 text-sm">Nenhum cliente cadastrado ainda.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ===== ACCESS TAB ===== */}
+      {adminTab === 'access' && (
+        <div className="space-y-4">
+          {/* Add access form */}
+          <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm">
+            <h3 className="text-sm font-semibold text-neutral-700 mb-4">Adicionar Acesso</h3>
+            <form onSubmit={handleAddAccess} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
               <div>
-                <label className="block text-sm font-medium mb-1">ID (identificador único)</label>
-                <input required disabled={!!formData.id && formData.id !== ''} value={formData.id} onChange={e => setFormData({...formData, id: e.target.value.toLowerCase().replace(/\s+/g, '-')})} className="w-full border rounded-lg p-2" placeholder="ex: clinvet-bsb" />
+                <label className="block text-xs font-medium text-neutral-500 mb-1">E-mail do usuário</label>
+                <input
+                  type="email"
+                  required
+                  value={accessForm.email}
+                  onChange={e => setAccessForm({ ...accessForm, email: e.target.value })}
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm"
+                  placeholder="usuario@email.com"
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Nome de Exibição</label>
-                <input required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full border rounded-lg p-2" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Tipo de Negócio</label>
-                <select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} className="w-full border rounded-lg p-2">
-                  <option value="default">Padrão</option>
-                  <option value="whatsapp">WhatsApp (Clinvet)</option>
-                  <option value="itv-manaus">ITV Manaus</option>
+                <label className="block text-xs font-medium text-neutral-500 mb-1">Empresa / Nível de acesso</label>
+                <select
+                  required
+                  value={accessForm.company_id}
+                  onChange={e => setAccessForm({ ...accessForm, company_id: e.target.value })}
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">Selecione…</option>
+                  <option value="ALL">⭐ Acesso Total (Admin)</option>
+                  {dbCompanies.map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Spreadsheet ID (Planilha Principal)</label>
-                <input value={formData.spreadsheet_id} onChange={e => setFormData({...formData, spreadsheet_id: e.target.value})} className="w-full border rounded-lg p-2" />
-              </div>
-              
-              <div className="md:col-span-2 mt-4"><h4 className="font-semibold text-neutral-700 border-b pb-2">Campos Específicos (Opcional - Customizar Abas)</h4></div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-1">Nome da Aba (Faturamento)</label>
-                <input value={formData.sheet_tab} onChange={e => setFormData({...formData, sheet_tab: e.target.value})} className="w-full border rounded-lg p-2" placeholder="Deixe em branco para usar o nome do cliente" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Nome da Aba (Meta Ads)</label>
-                <input value={formData.traffic_tab} onChange={e => setFormData({...formData, traffic_tab: e.target.value})} className="w-full border rounded-lg p-2" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Nome da Aba (Google Ads)</label>
-                <input value={formData.google_ads_tab} onChange={e => setFormData({...formData, google_ads_tab: e.target.value})} className="w-full border rounded-lg p-2" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Geração Anterior GID (Faturamento)</label>
-                <input value={formData.sheet_gid} onChange={e => setFormData({...formData, sheet_gid: e.target.value})} className="w-full border rounded-lg p-2" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Geração Anterior GID (Meta)</label>
-                <input value={formData.traffic_gid} onChange={e => setFormData({...formData, traffic_gid: e.target.value})} className="w-full border rounded-lg p-2" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Geração Anterior GID (Google)</label>
-                <input value={formData.google_ads_gid} onChange={e => setFormData({...formData, google_ads_gid: e.target.value})} className="w-full border rounded-lg p-2" />
-              </div>
+              <button
+                type="submit"
+                disabled={isSavingAccess}
+                className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-60"
+              >
+                {isSavingAccess ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                Adicionar
+              </button>
+            </form>
+          </div>
+
+          {/* Access list */}
+          <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-neutral-100 flex items-center justify-between">
+              <span className="text-sm font-medium text-neutral-700">Acessos Cadastrados</span>
+              <button onClick={fetchUserAccess} className="text-neutral-400 hover:text-neutral-700 transition-colors" title="Atualizar lista">
+                <RefreshCw className={`w-4 h-4 ${isLoadingAccess ? 'animate-spin' : ''}`} />
+              </button>
             </div>
-            <div className="flex gap-2 justify-end mt-4">
-              <button type="button" onClick={() => setIsEditing(false)} className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 rounded-lg">Cancelar</button>
-              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg">Salvar Cliente</button>
-            </div>
-          </form>
-        </div>
-      ) : (
-        <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-neutral-50 text-neutral-500">
-              <tr>
-                <th className="px-6 py-3 font-medium">ID</th>
-                <th className="px-6 py-3 font-medium">Nome</th>
-                <th className="px-6 py-3 font-medium">Tipo</th>
-                <th className="px-6 py-3 font-medium text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100">
-              {dbCompanies.map((c: any) => (
-                <tr key={c.id} className="hover:bg-neutral-50">
-                  <td className="px-6 py-4 font-mono text-xs">{c.id}</td>
-                  <td className="px-6 py-4 font-medium text-neutral-900">{c.name}</td>
-                  <td className="px-6 py-4">
-                    <span className="px-2 py-1 bg-neutral-100 text-neutral-600 rounded text-xs">{c.type || 'default'}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button onClick={() => {
-                        setFormData({
-                            id: c.id, name: c.name, type: c.type || 'default', 
-                            spreadsheet_id: c.spreadsheetId || '', sheet_tab: c.sheetTab || '', 
-                            traffic_tab: c.trafficTab || '', google_ads_tab: c.googleAdsTab || '', 
-                            sheet_gid: c.sheetGid || '', traffic_gid: c.trafficGid || '', google_ads_gid: c.googleAdsGid || ''
-                        });
-                        setIsEditing(true);
-                    }} className="text-indigo-600 hover:text-indigo-900 mr-3">Editar</button>
-                    <button onClick={() => deleteCompany(c.id)} className="text-red-600 hover:text-red-900">Excluir</button>
-                  </td>
-                </tr>
-              ))}
-              {dbCompanies.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-neutral-500">A tabela de clientes ainda está vazia ou não foi criada.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+            {isLoadingAccess ? (
+              <div className="px-6 py-10 text-center text-neutral-400 text-sm">Carregando acessos…</div>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-neutral-50 text-neutral-500 border-b border-neutral-100">
+                  <tr>
+                    <th className="px-6 py-3 font-medium">Usuário</th>
+                    <th className="px-6 py-3 font-medium">Acesso</th>
+                    <th className="px-6 py-3 font-medium text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {userAccessList.map((entry: any) => {
+                    const company = dbCompanies.find((c: any) => c.id === entry.company_id);
+                    const key = `${entry.user_email}::${entry.company_id}`;
+                    return (
+                      <tr key={key} className="hover:bg-neutral-50">
+                        <td className="px-6 py-3 font-mono text-xs text-neutral-700">{entry.user_email}</td>
+                        <td className="px-6 py-3">
+                          {entry.company_id === 'ALL'
+                            ? <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-medium">⭐ Admin (Acesso Total)</span>
+                            : <span className="px-2 py-1 bg-neutral-100 text-neutral-600 rounded text-xs">{company?.name || entry.company_id}</span>
+                          }
+                        </td>
+                        <td className="px-6 py-3 text-right">
+                          <button
+                            onClick={() => deleteAccess(entry.user_email, entry.company_id)}
+                            disabled={isDeletingAccess === key}
+                            className="text-red-500 hover:text-red-700 text-xs font-medium disabled:opacity-40"
+                          >
+                            {isDeletingAccess === key ? 'Removendo…' : 'Remover'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {userAccessList.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-6 py-10 text-center text-neutral-400 text-sm">Nenhum acesso cadastrado.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -266,6 +551,7 @@ export default function App() {
 
   const [dbCompanies, setDbCompanies] = useState<any[]>([]);
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const [allowedCompanyIds, setAllowedCompanyIds] = useState<string[]>([]);
   const [selectedCompany, setSelectedCompany] = useState("");
@@ -447,8 +733,12 @@ export default function App() {
       });
 
       if (ids.includes('ALL')) {
-        setAllowedCompanyIds(mappedCompanies.map(c => c.id));
+        setIsAdmin(true);
+        const allIds = mappedCompanies.map(c => c.id);
+        setAllowedCompanyIds(allIds);
+        setSelectedCompany(prev => (prev && allIds.includes(prev) ? prev : allIds[0] || ''));
       } else {
+        setIsAdmin(false);
         setAllowedCompanyIds(ids);
         setSelectedCompany(prev => {
           if (ids.length > 0 && !ids.includes(prev)) {
@@ -1905,7 +2195,7 @@ export default function App() {
                 disabled={allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0}
                 className={`appearance-none bg-neutral-100 border border-neutral-200 text-neutral-800 py-2 pl-4 pr-10 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0 ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
               >
-                {dbCompanies.filter(c => allowedCompanyIds.includes('ALL') || allowedCompanyIds.includes(c.id)).map((company) => (
+                {dbCompanies.filter(c => allowedCompanyIds.includes(c.id)).map((company) => (
                   <option key={company.id} value={company.id}>
                     {company.name}
                   </option>
@@ -1965,7 +2255,7 @@ export default function App() {
                 label: "Simulador",
                 icon: <Lightbulb className="w-4 h-4" />,
               },
-              ...(allowedCompanyIds.length === dbCompanies.length || allowedCompanyIds.includes('ALL') ? [{
+              ...(isAdmin ? [{
                 id: "admin",
                 label: "Gerenciar Clientes",
                 icon: <Settings className="w-4 h-4" />,
@@ -1990,7 +2280,12 @@ export default function App() {
         <main className="flex-1 min-w-0">
           {/* Tab Content */}
           {activeTab === "admin" && (
-            <AdminPanel dbCompanies={dbCompanies} fetchCompanies={() => supabase.auth.getSession().then(({data:{session}}) => session?.user?.email && fetchCompaniesAndAccess(session.user.email))} />
+            <AdminPanel
+              dbCompanies={dbCompanies}
+              fetchCompanies={() => supabase.auth.getSession().then(({ data: { session } }) => {
+                if (session?.user?.email) fetchCompaniesAndAccess(session.user.email);
+              })}
+            />
           )}
 
           {activeTab === "overview" && (
