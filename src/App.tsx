@@ -652,6 +652,30 @@ export default function App() {
   const SHEET_ID = "1kGjFoEJ36-g1empy9HmYzQmF0Rd-y_06sy54YvOYlps";
   const TRAFFIC_SHEET_ID = "1om3vD7mik6psxaLjt6QGqnkEnGdpr6T5dBrNIjYa4BY";
 
+  // Template system - built-in templates for quick access
+  const builtInTemplates: Record<string, any> = {
+    default: { revenue: { date: ["Data", ""], payment: ["Pedidos Pagos", "Faturamento"], quantity: ["Quantidade Pedidos"] }, traffic: { date: ["Data", ""], investment: ["Investimento"], revenue: ["Faturamento Meta Ads"], purchases: ["Compras Meta"], clicks: ["Cliques no Link"], pageViews: ["Visualizações de Página"], cartAdditions: ["Adições no Carrinho"] }, googleAds: { date: ["Data", ""], investment: ["Investimento"], revenue: ["Valor da conversão"], conversions: ["Conversões"], clicks: ["Cliques"], cartAdditions: ["Adições ao carrinho"] } },
+    whatsapp: { revenue: { date: ["Data", ""], payment: ["Faturamento", "$ Total Tráfego", "$ Total WhatsApp"], quantity: ["Fechamentos", "Qtd. Fechamentos"] }, traffic: { date: ["Data", ""], investment: ["Investimento Meta Ads", "Invest. Meta Ads", "Invest. Meta"], revenue: ["Faturamento Meta Ads", "$ Total WhatsApp"], purchases: [], clicks: [], pageViews: [], cartAdditions: ["Leads Totais", "Leads WhatsApp (Meta + Google)", "Leads WhatsApp"] }, googleAds: { date: ["Data", ""], investment: ["Investimento Google Ads", "Invest. Google Ads", "Invest. Google"], revenue: ["Faturamento Google Ads"], conversions: [], clicks: [], cartAdditions: [] } },
+    servicos: { revenue: { date: ["Data", ""], payment: ["Faturamento Diário"], quantity: ["Serviço aprovado"] }, traffic: { date: ["Data", ""], investment: ["Investimento"], revenue: [], purchases: [], clicks: ["Cliques"], pageViews: [], cartAdditions: ["Mensagens"] }, googleAds: { date: ["Data", ""], investment: ["Investimento"], revenue: ["Faturamento Google Ads"], conversions: ["Conversões"], clicks: ["Cliques no Link"], cartAdditions: [] } }
+  };
+
+  const getClientTemplate = (templateId: string | undefined) => {
+    return builtInTemplates[templateId || 'default'] || builtInTemplates.default;
+  };
+
+  const mapRowsUsingTemplate = (rows: any[], template: any, dataType: 'revenue' | 'traffic' | 'googleAds') => {
+    const cfg = template[dataType];
+    if (!cfg) return rows;
+    return rows.map((row: any) => {
+      const getVal = (fields: string[]) => { for (let f of fields) { if (row[f] !== undefined && row[f] !== "") return row[f]; } return "0"; };
+      const mapped: any = { ...row };
+      if (dataType === 'revenue') { mapped["Data"] = getVal(cfg.date); mapped["Pedidos Pagos"] = getVal(cfg.payment); mapped["Quantidade Pedidos"] = getVal(cfg.quantity); }
+      else if (dataType === 'traffic') { mapped["Data"] = getVal(cfg.date); mapped["Investimento"] = getVal(cfg.investment); mapped["Faturamento Meta Ads"] = getVal(cfg.revenue); mapped["Compras Meta"] = cfg.purchases?.length ? getVal(cfg.purchases) : "0"; mapped["Cliques no Link"] = cfg.clicks?.length ? getVal(cfg.clicks) : "0"; mapped["Visualizações de Página"] = cfg.pageViews?.length ? getVal(cfg.pageViews) : "0"; mapped["Adições no Carrinho"] = getVal(cfg.cartAdditions); }
+      else if (dataType === 'googleAds') { mapped["Data"] = getVal(cfg.date); mapped["Investimento"] = getVal(cfg.investment); mapped["Valor da conversão"] = getVal(cfg.revenue); mapped["Conversões"] = cfg.conversions?.length ? getVal(cfg.conversions) : "0"; mapped["Cliques"] = cfg.clicks?.length ? getVal(cfg.clicks) : "0"; mapped["Adições ao carrinho"] = cfg.cartAdditions?.length ? getVal(cfg.cartAdditions) : "0"; }
+      return mapped;
+    });
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -802,9 +826,7 @@ export default function App() {
     const hasSheetGid = !!(currentCompanyObj?.sheetGid);
     const hasTrafficGid = !!(currentCompanyObj?.trafficGid);
     const hasGoogleAdsGid = !!(currentCompanyObj?.googleAdsGid);
-
-    const isWhatsapp = (currentCompanyObj as any)?.type === "whatsapp";
-    const isItvManaus = (currentCompanyObj as any)?.type === "itv-manaus";
+    const clientTemplate = getClientTemplate((currentCompanyObj as any)?.templateId || (currentCompanyObj as any)?.type);
     const customSpreadsheetId = (currentCompanyObj as any)?.spreadsheetId;
     const customSheetTab = (currentCompanyObj as any)?.sheetTab || tabName;
     const customTrafficTab = (currentCompanyObj as any)?.trafficTab || tabName;
@@ -828,31 +850,7 @@ export default function App() {
             setSheetError(`A planilha é privada. Você precisa alterar o acesso para "Qualquer pessoa com o link" no Google Sheets.`);
           } else {
             let validData = results.data.filter((row: any) => Object.values(row).some(val => val !== ""));
-
-            if (isWhatsapp) {
-              validData = validData.map((row: any) => {
-                const getVal = (fields: string[]) => {
-                  for (let f of fields) { if (row[f] !== undefined && row[f] !== "") return row[f]; }
-                  return "0";
-                };
-                return {
-                  ...row,
-                  "Data": row[""] || row["Data"],
-                  "Pedidos Pagos": getVal(["Faturamento", "$ Total Tráfego", "$ Total WhatsApp"]),
-                  "Quantidade Pedidos": getVal(["Fechamentos", "Qtd. Fechamentos"])
-                };
-              });
-            } else if (isItvManaus) {
-              validData = validData.map((row: any) => {
-                return {
-                  ...row,
-                  "Data": row[""] || row["Data"],
-                  "Pedidos Pagos": row["Faturamento Diário"] || "0",
-                  "Quantidade Pedidos": row["Serviço aprovado"] || "0"
-                };
-              });
-            }
-
+            validData = mapRowsUsingTemplate(validData, clientTemplate, 'revenue');
             setSheetData(validData);
           }
         }
@@ -879,43 +877,7 @@ export default function App() {
             setTrafficError(`A planilha de tráfego é privada. Você precisa alterar o acesso para "Qualquer pessoa com o link".`);
           } else {
             let validData = results.data.filter((row: any) => Object.values(row).some(val => val !== ""));
-
-            if (isWhatsapp) {
-              validData = validData.map((row: any) => {
-                const getVal = (fields: string[]) => {
-                  for (let f of fields) { if (row[f] !== undefined && row[f] !== "") return row[f]; }
-                  return "0";
-                };
-                return {
-                  ...row,
-                  "Data": row[""] || row["Data"],
-                  "Investimento": getVal(["Investimento Meta Ads", "Invest. Meta Ads", "Invest. Meta"]),
-                  "Faturamento Meta Ads": getVal(["Faturamento Meta Ads", "$ Total WhatsApp"]),
-                  "Compras Meta": "0",
-                  "Cliques no Link": "0",
-                  "Visualizações de Página": "0",
-                  "Adições no Carrinho": getVal(["Leads Totais", "Leads WhatsApp (Meta + Google)", "Leads WhatsApp"])
-                };
-              });
-            } else if (isItvManaus) {
-              validData = validData.map((row: any) => {
-                const getVal = (fields: string[]) => {
-                  for (let f of fields) { if (row[f] !== undefined && row[f] !== "") return row[f]; }
-                  return "0";
-                };
-                return {
-                  ...row,
-                  "Data": row[""] || row["Data"],
-                  "Investimento": getVal(["Investimento"]),
-                  "Faturamento Meta Ads": "0",
-                  "Compras Meta": "0",
-                  "Cliques no Link": getVal(["Cliques"]),
-                  "Visualizações de Página": "0",
-                  "Adições no Carrinho": getVal(["Mensagens"])
-                };
-              });
-            }
-
+            validData = mapRowsUsingTemplate(validData, clientTemplate, 'traffic');
             setTrafficData(validData);
           }
         }
@@ -928,9 +890,10 @@ export default function App() {
     });
 
     // Fetch Google Ads Sheet
+    const usesCustomSpreadsheet = ['whatsapp', 'servicos'].includes((currentCompanyObj as any)?.templateId || (currentCompanyObj as any)?.type);
     const googleAdsUrl = hasGoogleAdsGid
       ? `https://docs.google.com/spreadsheets/d/${TRAFFIC_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${(currentCompanyObj as any).googleAdsGid}${rangeParams}`
-      : isWhatsapp || isItvManaus
+      : usesCustomSpreadsheet
         ? `https://docs.google.com/spreadsheets/d/${customSpreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(customGoogleAdsTab)}${rangeParams}`
         : `https://docs.google.com/spreadsheets/d/${TRAFFIC_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(customGoogleAdsTab)}${rangeParams}`;
 
@@ -945,41 +908,7 @@ export default function App() {
             setGoogleAdsError(`A planilha do Google Ads é privada. Você precisa alterar o acesso para "Qualquer pessoa com o link".`);
           } else {
             let validData = results.data.filter((row: any) => Object.values(row).some(val => val !== ""));
-
-            if (isWhatsapp) {
-              validData = validData.map((row: any) => {
-                const getVal = (fields: string[]) => {
-                  for (let f of fields) { if (row[f] !== undefined && row[f] !== "") return row[f]; }
-                  return "0";
-                };
-                return {
-                  ...row,
-                  "Data": row[""] || row["Data"],
-                  "Investimento": getVal(["Investimento Google Ads", "Invest. Google Ads", "Invest. Google"]),
-                  "Valor da conversão": getVal(["Faturamento Google Ads"]),
-                  "Conversões": "0",
-                  "Cliques": "0",
-                  "Adições ao carrinho": "0"
-                };
-              });
-            } else if (isItvManaus) {
-              validData = validData.map((row: any) => {
-                const getVal = (fields: string[]) => {
-                  for (let f of fields) { if (row[f] !== undefined && row[f] !== "") return row[f]; }
-                  return "0";
-                };
-                return {
-                  ...row,
-                  "Data": row[""] || row["Data"],
-                  "Investimento": getVal(["Investimento"]),
-                  "Valor da conversão": getVal(["Faturamento Google Ads"]),
-                  "Conversões": getVal(["Conversões"]),
-                  "Cliques": getVal(["Cliques no Link"]),
-                  "Adições ao carrinho": "0"
-                };
-              });
-            }
-
+            validData = mapRowsUsingTemplate(validData, clientTemplate, 'googleAds');
             setGoogleAdsData(validData);
           }
         }
