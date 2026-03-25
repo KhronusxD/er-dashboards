@@ -327,7 +327,7 @@ export default function App() {
     const url = hasSheetGid
       ? `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${(currentCompanyObj as any).sheetGid}${rangeParams}`
       : ordersSpreadsheetId
-        ? `https://docs.google.com/spreadsheets/d/${ordersSpreadsheetId}/gviz/tq?tqx=out:csv${rangeParams}`
+        ? `https://docs.google.com/spreadsheets/d/${ordersSpreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(customSheetTab)}${rangeParams}`
         : `https://docs.google.com/spreadsheets/d/${customSpreadsheetId || SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(customSheetTab)}${rangeParams}`;
 
     Papa.parse(url, {
