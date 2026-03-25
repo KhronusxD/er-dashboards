@@ -313,17 +313,21 @@ export default function App() {
     const hasTrafficGid = !!(currentCompanyObj?.trafficGid);
     const hasGoogleAdsGid = !!(currentCompanyObj?.googleAdsGid);
     const clientTemplate = getClientTemplate((currentCompanyObj as any)?.templateId || (currentCompanyObj as any)?.type);
-    const customSpreadsheetId = (currentCompanyObj as any)?.spreadsheetId;
-    const customSheetTab = (currentCompanyObj as any)?.sheetTab || tabName;
-    const customTrafficTab = (currentCompanyObj as any)?.trafficTab || tabName;
-    const customGoogleAdsTab = (currentCompanyObj as any)?.googleAdsTab || `${tabName} - Google Ads`;
+    const customSpreadsheetId = currentCompanyObj?.spreadsheet_id || (currentCompanyObj as any)?.spreadsheetId;
+    const ordersSpreadsheetId = currentCompanyObj?.orders_spreadsheet_id || (currentCompanyObj as any)?.ordersSpreadsheetId;
+    const customSheetTab = currentCompanyObj?.sheet_tab || (currentCompanyObj as any)?.sheetTab || tabName;
+    const customTrafficTab = currentCompanyObj?.traffic_tab || (currentCompanyObj as any)?.trafficTab || tabName;
+    const customGoogleAdsTab = currentCompanyObj?.google_ads_tab || (currentCompanyObj as any)?.googleAdsTab || `${tabName} - Google Ads`;
     const sheetRange = (currentCompanyObj as any)?.sheetRange;
     const rangeParams = sheetRange ? `&range=${sheetRange}` : "";
 
     // Fetch Revenue Sheet
+    // Se há uma planilha de pedidos configurada, usa ela (estrutura fixa: A=Data, B=Qtd Pedidos, C=Pedidos Pagos, D=Pedidos não pagos)
     const url = hasSheetGid
       ? `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${(currentCompanyObj as any).sheetGid}${rangeParams}`
-      : `https://docs.google.com/spreadsheets/d/${customSpreadsheetId || SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(customSheetTab)}${rangeParams}`;
+      : ordersSpreadsheetId
+        ? `https://docs.google.com/spreadsheets/d/${ordersSpreadsheetId}/gviz/tq?tqx=out:csv${rangeParams}`
+        : `https://docs.google.com/spreadsheets/d/${customSpreadsheetId || SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(customSheetTab)}${rangeParams}`;
 
     Papa.parse(url, {
       download: true,

@@ -4,6 +4,7 @@ export interface Company {
   name: string;
   type: 'default' | 'whatsapp' | 'servicos' | string;
   spreadsheet_id?: string;
+  orders_spreadsheet_id?: string;
   sheet_tab?: string;
   traffic_tab?: string;
   google_ads_tab?: string;
@@ -14,6 +15,7 @@ export interface Company {
   updated_at?: string;
   // Deprecated (from old schema):
   spreadsheetId?: string;
+  ordersSpreadsheetId?: string;
   sheetTab?: string;
   trafficTab?: string;
   googleAdsTab?: string;
@@ -53,6 +55,7 @@ export interface CompanyFormData {
   name: string;
   type: string;
   spreadsheet_id: string;
+  orders_spreadsheet_id: string;
   sheet_tab: string;
   traffic_tab: string;
   google_ads_tab: string;

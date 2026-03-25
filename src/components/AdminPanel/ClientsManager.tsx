@@ -12,6 +12,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({ dbCompanies, fet
   const [isEditingCompany, setIsEditingCompany] = useState(false);
   const [formData, setFormData] = useState<any>({
     id: '', name: '', type: 'default', spreadsheet_id: '',
+    orders_spreadsheet_id: '',
     sheet_tab: '', traffic_tab: '', google_ads_tab: '',
     sheet_gid: '', traffic_gid: '', google_ads_gid: ''
   });
@@ -33,6 +34,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({ dbCompanies, fet
         name: formData.name,
         type: formData.type,
         spreadsheet_id: formData.spreadsheet_id || null,
+        orders_spreadsheet_id: formData.orders_spreadsheet_id || null,
         sheet_tab: formData.sheet_tab || null,
         traffic_tab: formData.traffic_tab || null,
         google_ads_tab: formData.google_ads_tab || null,
@@ -69,16 +71,21 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({ dbCompanies, fet
   };
 
   const openNewForm = () => {
-    setFormData({ id: '', name: '', type: 'default', spreadsheet_id: '', sheet_tab: '', traffic_tab: '', google_ads_tab: '', sheet_gid: '', traffic_gid: '', google_ads_gid: '' });
+    setFormData({ id: '', name: '', type: 'default', spreadsheet_id: '', orders_spreadsheet_id: '', sheet_tab: '', traffic_tab: '', google_ads_tab: '', sheet_gid: '', traffic_gid: '', google_ads_gid: '' });
     setIsEditingCompany(true);
   };
 
   const openEditForm = (c: any) => {
     setFormData({
       id: c.id, name: c.name, type: c.type || 'default',
-      spreadsheet_id: c.spreadsheetId || '', sheet_tab: c.sheetTab || '',
-      traffic_tab: c.trafficTab || '', google_ads_tab: c.googleAdsTab || '',
-      sheet_gid: c.sheetGid || '', traffic_gid: c.trafficGid || '', google_ads_gid: c.googleAdsGid || ''
+      spreadsheet_id: c.spreadsheet_id || c.spreadsheetId || '',
+      orders_spreadsheet_id: c.orders_spreadsheet_id || c.ordersSpreadsheetId || '',
+      sheet_tab: c.sheet_tab || c.sheetTab || '',
+      traffic_tab: c.traffic_tab || c.trafficTab || '',
+      google_ads_tab: c.google_ads_tab || c.googleAdsTab || '',
+      sheet_gid: c.sheet_gid || c.sheetGid || '',
+      traffic_gid: c.traffic_gid || c.trafficGid || '',
+      google_ads_gid: c.google_ads_gid || c.googleAdsGid || ''
     });
     setIsEditingCompany(true);
   };
@@ -154,13 +161,27 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({ dbCompanies, fet
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1">ID da Planilha Principal</label>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">
+                  ID da Planilha de Ads <span className="text-neutral-400 font-normal text-xs">(Meta Ads / Google Ads)</span>
+                </label>
                 <input
                   value={formData.spreadsheet_id}
                   onChange={e => setFormData({ ...formData, spreadsheet_id: e.target.value })}
                   className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm font-mono"
                   placeholder="Cole o ID da URL do Google Sheets"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">
+                  ID da Planilha de Pedidos <span className="text-neutral-400 font-normal text-xs">(Faturamento)</span>
+                </label>
+                <input
+                  value={formData.orders_spreadsheet_id}
+                  onChange={e => setFormData({ ...formData, orders_spreadsheet_id: e.target.value })}
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm font-mono"
+                  placeholder="Cole o ID da URL do Google Sheets"
+                />
+                <p className="text-xs text-neutral-400 mt-1">Colunas: A=Data · B=Qtd Pedidos · C=Pedidos Pagos (Faturamento) · D=Pedidos não pagos</p>
               </div>
             </div>
 
