@@ -1,6 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://knrxjexvuaefqfowvkhy.supabase.co';
-const supabaseKey = 'sb_publishable_aCLHxoz3nfF9CFdqGF-ddA_prPmMeIM';
+// Projeto consolidado: nucly-agency (dasbpktslyovikphwmrt).
+// Os dados do dashboard vivem no schema `napan`, isolados do schema public do Nucly.
+const supabaseUrl = 'https://dasbpktslyovikphwmrt.supabase.co';
+const supabaseKey = 'sb_publishable_Y2J3_HkrtokpW8wI4GfB5Q__CsnAAWd';
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  db: { schema: 'napan' },
+});
