@@ -11,6 +11,7 @@ import {
   CalendarDays,
   Settings,
   LogOut,
+  ListTodo,
 } from "lucide-react";
 
 import {
@@ -27,6 +28,7 @@ import { AccountHealthTab } from "./components/Dashboard/tabs/AccountHealthTab";
 import { RevenueTab } from "./components/Dashboard/tabs/RevenueTab";
 import { StrategyTab } from "./components/Dashboard/tabs/StrategyTab";
 import { SimulationsTab } from "./components/Dashboard/tabs/SimulationsTab";
+import { TarefasTab } from "./components/Dashboard/tabs/TarefasTab";
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1115,6 +1117,7 @@ export default function App() {
               { id: "revenue", label: "Faturamento", icon: <Receipt className="w-4 h-4" /> },
               { id: "strategy", label: "Estratégia", icon: <Lightbulb className="w-4 h-4" /> },
               { id: "simulations", label: "Simulador", icon: <Lightbulb className="w-4 h-4" /> },
+              { id: "tarefas", label: "Tarefas", icon: <ListTodo className="w-4 h-4" /> },
               ...(isAdmin ? [{ id: "admin", label: "Gerenciar Clientes", icon: <Settings className="w-4 h-4" /> }] : []),
             ].map((tab) => (
               <button
@@ -1286,6 +1289,12 @@ export default function App() {
               setSimCheckoutRate={setSimCheckoutRate}
               setSimPurcRate={setSimPurcRate}
               setSimTicket={setSimTicket}
+            />
+          )}
+
+          {activeTab === "tarefas" && (
+            <TarefasTab
+              companies={dbCompanies.filter((c) => allowedCompanyIds.includes(c.id))}
             />
           )}
         </main>
