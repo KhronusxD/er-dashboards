@@ -1073,59 +1073,89 @@ export default function App() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-neutral-50 font-sans text-neutral-900">
-      {/* Header */}
-      <header className="bg-white border-b border-neutral-200 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-white" />
-            </div>
-            <h1 className="text-xl font-semibold tracking-tight">Dashboards</h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <select
-                value={selectedCompany}
-                onChange={(e) => setSelectedCompany(e.target.value)}
-                disabled={allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0}
-                className={`appearance-none bg-neutral-100 border border-neutral-200 text-neutral-800 py-2 pl-4 pr-10 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0 ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                {dbCompanies.filter(c => allowedCompanyIds.includes(c.id)).map((company) => (
-                  <option key={company.id} value={company.id}>{company.name}</option>
-                ))}
-              </select>
-              <ChevronDown className="w-4 h-4 text-neutral-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
-            <button onClick={handleLogout} className="flex items-center justify-center w-10 h-10 rounded-lg text-neutral-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Sair do sistema">
-              <LogOut className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      </header>
+  const tabsList = [
+    { id: "overview", label: "Visão Geral", icon: <LayoutDashboard className="w-4 h-4" /> },
+    { id: "tarefas", label: "Tarefas", icon: <ListTodo className="w-4 h-4" /> },
+    { id: "monthly", label: "Visão Mensal", icon: <CalendarDays className="w-4 h-4" /> },
+    { id: "funnel", label: "Funil de Vendas", icon: <Filter className="w-4 h-4" /> },
+    { id: "account-health", label: "Saúde da Conta", icon: <Activity className="w-4 h-4" /> },
+    { id: "revenue", label: "Faturamento", icon: <Receipt className="w-4 h-4" /> },
+    { id: "strategy", label: "Estratégia", icon: <Lightbulb className="w-4 h-4" /> },
+    { id: "simulations", label: "Simulador", icon: <Lightbulb className="w-4 h-4" /> },
+    ...(isAdmin ? [{ id: "admin", label: "Gerenciar Clientes", icon: <Settings className="w-4 h-4" /> }] : []),
+  ];
 
-      <div className="flex flex-col md:flex-row max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 gap-8 min-h-[calc(100vh-4rem)]">
-        {/* Sidebar Tabs */}
-        <aside className="w-full md:w-64 shrink-0">
-          <nav className="flex flex-row md:flex-col space-x-2 md:space-x-0 md:space-y-2 overflow-x-auto pb-4 md:pb-0">
-            {[
-              { id: "overview", label: "Visão Geral", icon: <LayoutDashboard className="w-4 h-4" /> },
-              { id: "monthly", label: "Visão Mensal", icon: <CalendarDays className="w-4 h-4" /> },
-              { id: "funnel", label: "Funil de Vendas", icon: <Filter className="w-4 h-4" /> },
-              { id: "account-health", label: "Saúde da Conta", icon: <Activity className="w-4 h-4" /> },
-              { id: "revenue", label: "Faturamento", icon: <Receipt className="w-4 h-4" /> },
-              { id: "strategy", label: "Estratégia", icon: <Lightbulb className="w-4 h-4" /> },
-              { id: "simulations", label: "Simulador", icon: <Lightbulb className="w-4 h-4" /> },
-              { id: "tarefas", label: "Tarefas", icon: <ListTodo className="w-4 h-4" /> },
-              ...(isAdmin ? [{ id: "admin", label: "Gerenciar Clientes", icon: <Settings className="w-4 h-4" /> }] : []),
-            ].map((tab) => (
+  return (
+    <div className="min-h-screen bg-neutral-50 font-sans text-neutral-900 md:flex">
+      {/* Sidebar fixa (desktop) */}
+      <aside className="hidden md:flex md:flex-col w-64 shrink-0 h-screen sticky top-0 bg-white border-r border-neutral-200">
+        <div className="h-16 flex items-center gap-3 px-5 border-b border-neutral-200 shrink-0">
+          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+            <BarChart3 className="w-5 h-5 text-white" />
+          </div>
+          <h1 className="text-lg font-semibold tracking-tight">Dashboards</h1>
+        </div>
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+          {tabsList.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all ${activeTab === tab.id
+                ? "bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm"
+                : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 border border-transparent"
+                }`}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+        <div className="p-3 border-t border-neutral-200 shrink-0">
+          <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-neutral-500 hover:text-red-600 hover:bg-red-50 transition-colors">
+            <LogOut className="w-4 h-4" /> Sair do sistema
+          </button>
+        </div>
+      </aside>
+
+      {/* Coluna principal (full-width) */}
+      <div className="flex-1 min-w-0 flex flex-col min-h-screen">
+        {/* Top bar */}
+        <header className="sticky top-0 z-10 bg-white/85 backdrop-blur border-b border-neutral-200">
+          <div className="h-16 flex items-center gap-3 px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center gap-2 md:hidden">
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+                <BarChart3 className="w-5 h-5 text-white" />
+              </div>
+              <span className="font-semibold tracking-tight">Dashboards</span>
+            </div>
+            <div className="flex items-center gap-3 ml-auto">
+              <div className="relative">
+                <select
+                  value={selectedCompany}
+                  onChange={(e) => setSelectedCompany(e.target.value)}
+                  disabled={allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0}
+                  className={`appearance-none bg-neutral-100 border border-neutral-200 text-neutral-800 py-2 pl-4 pr-10 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${allowedCompanyIds.length <= 1 && allowedCompanyIds.length !== 0 ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  {dbCompanies.filter(c => allowedCompanyIds.includes(c.id)).map((company) => (
+                    <option key={company.id} value={company.id}>{company.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4 text-neutral-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+              <button onClick={handleLogout} className="md:hidden flex items-center justify-center w-10 h-10 rounded-lg text-neutral-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Sair do sistema">
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+          {/* Nav horizontal (mobile) */}
+          <nav className="md:hidden flex gap-2 overflow-x-auto px-4 pb-3">
+            {tabsList.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all whitespace-nowrap ${activeTab === tab.id
-                  ? "bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100"
-                  : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 border border-transparent"
+                className={`flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-all ${activeTab === tab.id
+                  ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                  : "text-neutral-500 hover:bg-neutral-100 border border-transparent"
                   }`}
               >
                 {tab.icon}
@@ -1133,10 +1163,11 @@ export default function App() {
               </button>
             ))}
           </nav>
-        </aside>
+        </header>
 
-        {/* Main Content Area */}
-        <main className="flex-1 min-w-0">
+        {/* Conteúdo */}
+        <main className="flex-1 px-4 sm:px-6 lg:px-10 py-8">
+          <div className="mx-auto w-full max-w-[1600px]">
           {activeTab === "admin" && (
             <AdminPanel
               dbCompanies={dbCompanies}
@@ -1297,6 +1328,7 @@ export default function App() {
               companies={dbCompanies.filter((c) => allowedCompanyIds.includes(c.id))}
             />
           )}
+          </div>
         </main>
       </div>
     </div>
