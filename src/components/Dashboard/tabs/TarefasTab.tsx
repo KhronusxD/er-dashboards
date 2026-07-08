@@ -147,6 +147,12 @@ export function TarefasTab({ companies }: { companies: Company[] }) {
     const { error } = await supabase.from("tarefas").update({ due_date: newDate }).eq("id", id);
     if (error) { alert("Erro ao mover tarefa: " + error.message); load(); }
   }
+  // Muda o status ao arrastar entre colunas do kanban
+  async function moveStatus(id: string, newStatus: string) {
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t)));
+    const { error } = await supabase.from("tarefas").update({ status: newStatus }).eq("id", id);
+    if (error) { alert("Erro ao mover tarefa: " + error.message); load(); }
+  }
   async function save() {
     if (!draft || !draft.title.trim()) return;
     const payload = {
@@ -229,7 +235,7 @@ export function TarefasTab({ companies }: { companies: Company[] }) {
           onOpenNew={openNew} onOpenEdit={openEdit} onMove={moveTask}
         />
       ) : (
-        <KanbanView tasks={filtered} companyById={companyById} onOpen={openEdit} onNew={openNew} />
+        <KanbanView tasks={filtered} companyById={companyById} onOpen={openEdit} onNew={openNew} onMoveStatus={moveStatus} />
       )}
 
       {loading && <p className="text-xs text-neutral-400">Carregando...</p>}
@@ -357,15 +363,27 @@ function CalendarView({ year, month, setYear, setMonth, tasks, companyById, drag
 }
 
 // ── Visão kanban ────────────────────────────────────────────────────────────
-function KanbanView({ tasks, companyById, onOpen, onNew }: {
+function KanbanView({ tasks, companyById, onOpen, onNew, onMoveStatus }: {
   tasks: Task[]; companyById: Record<string, Company>; onOpen: (t: Task) => void; onNew: () => void;
+  onMoveStatus: (id: string, status: string) => void;
 }) {
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  function dropOn(status: string, e: React.DragEvent) {
+    e.preventDefault();
+    const id = e.dataTransfer.getData("text/tarefa-id");
+    setDragOverCol(null);
+    if (id) onMoveStatus(id, status);
+  }
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
       {STATUSES.map((s) => {
         const list = tasks.filter((t) => t.status === s.value);
         return (
-          <div key={s.value} className="bg-neutral-50 rounded-2xl border border-neutral-200 p-3 min-h-[120px]">
+          <div key={s.value}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOverCol !== s.value) setDragOverCol(s.value); }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverCol((c) => (c === s.value ? null : c)); }}
+            onDrop={(e) => dropOn(s.value, e)}
+            className={`rounded-2xl border p-3 min-h-[120px] transition-colors ${dragOverCol === s.value ? "border-indigo-400 bg-indigo-50/60 ring-2 ring-indigo-200" : "bg-neutral-50 border-neutral-200"}`}>
             <div className="flex items-center gap-2 mb-3">
               <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
               <span className="text-sm font-semibold text-neutral-700">{s.label}</span>
@@ -376,8 +394,11 @@ function KanbanView({ tasks, companyById, onOpen, onNew }: {
                 const company = t.company_id ? companyById[t.company_id] : null;
                 const pr = priorityOf(t.priority);
                 return (
-                  <div key={t.id} onClick={() => onOpen(t)}
-                    className="bg-white rounded-xl border border-neutral-200 p-3 cursor-pointer hover:shadow-md transition-shadow"
+                  <div key={t.id}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/tarefa-id", t.id); }}
+                    onClick={() => onOpen(t)}
+                    className="bg-white rounded-xl border border-neutral-200 p-3 cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow"
                     style={{ borderLeft: `3px solid ${t.accent_color || (t.company_id ? companyColor(t.company_id) : "#cbd5e1")}` }}>
                     <div className="text-sm font-medium text-neutral-800 mb-1.5 flex items-start gap-1.5">
                       {t.icon && <span className="shrink-0">{t.icon}</span>}<span className="break-words">{t.title}</span>
