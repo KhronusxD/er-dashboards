@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Papa from "papaparse";
 import {
   BarChart3,
@@ -44,6 +44,9 @@ export default function App() {
   const [allowedCompanyIds, setAllowedCompanyIds] = useState<string[]>([]);
   const [selectedCompany, setSelectedCompany] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
+  // E-mail do usuário já carregado — evita recarregar tudo a cada evento de auth
+  // (o Supabase dispara SIGNED_IN/TOKEN_REFRESHED quando a janela recupera o foco).
+  const loadedEmailRef = useRef<string | null>(null);
 
   // Daily Chart Settings
   const [chartSource, setChartSource] = useState<"all" | "meta" | "google">("all");
@@ -269,32 +272,32 @@ export default function App() {
   };
 
   useEffect(() => {
-
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setIsAuthenticated(true);
-        if (session.user?.email) {
-          fetchCompaniesAndAccess(session.user.email);
-        } else {
-          setIsLoadingCompanies(false);
-        }
-      } else {
+    // Carrega empresas/acessos só quando o usuário logado MUDA de fato. Sem essa
+    // guarda, cada evento de auth (que o Supabase dispara ao recuperar o foco da
+    // janela) recarregava tudo e apagava o que estava sendo digitado.
+    const loadFor = (email: string | null, hasSession: boolean) => {
+      setIsAuthenticated(hasSession);
+      if (!email) {
+        loadedEmailRef.current = null;
+        if (!hasSession) setAllowedCompanyIds(['NONE']);
         setIsLoadingCompanies(false);
+        return;
+      }
+      if (email !== loadedEmailRef.current) {
+        loadedEmailRef.current = email;
+        fetchCompaniesAndAccess(email);
       }
     };
 
-    checkSession();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) loadFor(session.user?.email ?? null, true);
+      else setIsLoadingCompanies(false);
+    });
 
-    // Listen to auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setIsAuthenticated(!!session);
-      if (event === 'SIGNED_IN' && session?.user?.email) {
-        fetchCompaniesAndAccess(session.user.email);
-      } else if (!session) {
-        setAllowedCompanyIds(['NONE']);
-        setIsLoadingCompanies(false);
-      }
+    // Só reage a troca real de usuário (login/logout/troca de conta) — ignora os
+    // eventos repetidos de foco/refresh que mantêm o mesmo e-mail.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      loadFor(session?.user?.email ?? null, !!session);
     });
 
     return () => subscription.unsubscribe();
