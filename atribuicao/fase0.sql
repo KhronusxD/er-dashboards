@@ -222,3 +222,21 @@ END $$;
 
 REVOKE ALL ON FUNCTION napan.track(jsonb) FROM public;
 GRANT EXECUTE ON FUNCTION napan.track(jsonb) TO anon, authenticated, service_role;
+
+-- ---------- 3. Gasto por anúncio (alimentado pelo sync_gastos_meta.sh) ----------
+
+CREATE TABLE IF NOT EXISTS napan.atr_gastos (
+  id bigserial PRIMARY KEY,
+  dia date NOT NULL,
+  canal text NOT NULL DEFAULT 'meta',
+  campaign_id text, campaign_name text,
+  adset_id text, adset_name text,
+  ad_id text, ad_name text,
+  gasto numeric NOT NULL DEFAULT 0,
+  impressoes bigint, cliques bigint,
+  atualizado_em timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS atr_gastos_unq ON napan.atr_gastos(dia, canal, coalesce(ad_id,''), coalesce(campaign_id,''));
+GRANT SELECT ON napan.atr_gastos TO anon, authenticated;
+GRANT ALL ON napan.atr_gastos TO service_role;
+REVOKE INSERT, UPDATE, DELETE ON napan.atr_gastos FROM anon, authenticated;

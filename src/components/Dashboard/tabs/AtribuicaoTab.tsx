@@ -27,6 +27,7 @@ type Pedido = {
   ultimo_toque: Snapshot;
 };
 type Cliente = { cliente_id: number; email: string; cnpj: string | null; nome: string | null };
+type Gasto = { dia: string; canal: string; campaign_id: string | null; campaign_name: string | null; ad_id: string | null; ad_name: string | null; gasto: number };
 type Toque = {
   id: number; vid: string; ocorrido_em: string; tipo: string | null;
   source: string | null; medium: string | null; campaign: string | null;
@@ -72,13 +73,14 @@ export function AtribuicaoTab() {
   const [toques, setToques] = useState<Toque[]>([]);
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [gastos, setGastos] = useState<Gasto[]>([]);
   const [loading, setLoading] = useState(true);
   const [modelo, setModelo] = useState<Modelo>("primeiro");
   const [jornadaDe, setJornadaDe] = useState<Cliente | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: tq }, { data: peds }, { data: clis }] = await Promise.all([
+    const [{ data: tq }, { data: peds }, { data: clis }, { data: gst }] = await Promise.all([
       supabase.from("atr_toques")
         .select("id, vid, ocorrido_em, tipo, source, medium, campaign, content, term, campaign_id, adset_id, ad_id, fbclid, gclid, landing_url, device")
         .order("ocorrido_em", { ascending: false }).limit(3000),
@@ -86,10 +88,12 @@ export function AtribuicaoTab() {
         .select("pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque")
         .order("ocorrido_em", { ascending: false }).limit(2000),
       supabase.from("atr_clientes").select("cliente_id, email, cnpj, nome").limit(3000),
+      supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, ad_id, ad_name, gasto").limit(8000),
     ]);
     setToques((tq as any) ?? []);
     setPedidos((peds as any) ?? []);
     setClientes((clis as any) ?? []);
+    setGastos((gst as any) ?? []);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -149,7 +153,7 @@ export function AtribuicaoTab() {
 
       {!vazio && sub === "visao" && <VisaoGeral toques={toques} pedidos={pedidos} modelo={modelo} />}
       {!vazio && sub === "origens" && <Origens toques={toques} />}
-      {!vazio && sub === "criativos" && <Criativos pedidos={pedidos} toques={toques} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
+      {!vazio && sub === "criativos" && <Criativos pedidos={pedidos} toques={toques} gastos={gastos} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidos} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "clientes" && <ClientesView pedidos={pedidos} clientes={clientes} onJornada={setJornadaDe} />}
 
@@ -405,12 +409,40 @@ function Origens({ toques }: { toques: Toque[] }) {
 }
 
 // ═════════════════ SUB-ABA: CRIATIVOS & CAMPANHAS ═══════════════════════════
-function Criativos({ pedidos, toques, modelo, clientePorId, onJornada }: {
-  pedidos: Pedido[]; toques: Toque[]; modelo: Modelo;
+function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }: {
+  pedidos: Pedido[]; toques: Toque[]; gastos: Gasto[]; modelo: Modelo;
   clientePorId: Record<string, Cliente>; onJornada: (c: Cliente) => void;
 }) {
   const [nivel, setNivel] = useState<"criativo" | "campanha">("criativo");
   const [aberto, setAberto] = useState<string | null>(null);
+
+  // gasto agregado por ad_id, nome do anúncio e campanha (casa por ID ou por nome)
+  const gastoIdx = useMemo(() => {
+    const porAdId: Record<string, number> = {};
+    const porAdNome: Record<string, number> = {};
+    const porCampId: Record<string, number> = {};
+    const porCampNome: Record<string, number> = {};
+    for (const g of gastos) {
+      const v = Number(g.gasto) || 0;
+      if (g.ad_id) porAdId[g.ad_id] = (porAdId[g.ad_id] ?? 0) + v;
+      if (g.ad_name) porAdNome[g.ad_name.trim().toLowerCase()] = (porAdNome[g.ad_name.trim().toLowerCase()] ?? 0) + v;
+      if (g.campaign_id) porCampId[g.campaign_id] = (porCampId[g.campaign_id] ?? 0) + v;
+      if (g.campaign_name) porCampNome[g.campaign_name.trim().toLowerCase()] = (porCampNome[g.campaign_name.trim().toLowerCase()] ?? 0) + v;
+    }
+    return { porAdId, porAdNome, porCampId, porCampNome };
+  }, [gastos]);
+
+  const gastoDe = useCallback((nome: string, adId: string | null): number | null => {
+    const k = nome.trim().toLowerCase();
+    if (nivel === "criativo") {
+      if (adId && gastoIdx.porAdId[adId] != null) return gastoIdx.porAdId[adId];
+      if (gastoIdx.porAdNome[k] != null) return gastoIdx.porAdNome[k];
+    } else {
+      if (gastoIdx.porCampNome[k] != null) return gastoIdx.porCampNome[k];
+      if (gastoIdx.porCampId[nome] != null) return gastoIdx.porCampId[nome];
+    }
+    return null;
+  }, [gastoIdx, nivel]);
 
   const chaveDe = useCallback((s: Snapshot) => {
     if (!s) return SEM_ATRIB;
@@ -466,6 +498,8 @@ function Criativos({ pedidos, toques, modelo, clientePorId, onJornada }: {
         <span className="w-16 text-right">Pedidos</span>
         <span className="w-16 text-right">Clientes</span>
         <span className="w-20 text-right" title="Pedidos em que foi o 1º toque (introduziu) / o último (fechou)">Trouxe/Fechou</span>
+        <span className="w-20 text-right" title="Gasto sincronizado do Meta (do go-live em diante)">Gasto</span>
+        <span className="w-16 text-right" title="Receita atribuída ÷ gasto">ROAS</span>
         <span className="w-4" />
       </div>
 
@@ -494,6 +528,18 @@ function Criativos({ pedidos, toques, modelo, clientePorId, onJornada }: {
                   <span className="text-neutral-300"> / </span>
                   <span className="text-emerald-600 font-medium">{r.fechou}</span>
                 </span>
+                {(() => {
+                  const g = gastoDe(r.nome, r.adId);
+                  const roas = g && g > 0 ? r.receita / g : null;
+                  return (
+                    <>
+                      <span className="w-20 text-right text-sm text-neutral-600 whitespace-nowrap">{g != null ? brl(g) : <span className="text-neutral-300">—</span>}</span>
+                      <span className={`w-16 text-right text-sm font-semibold whitespace-nowrap ${roas == null ? "text-neutral-300" : roas >= 1 ? "text-emerald-600" : "text-red-500"}`}>
+                        {roas == null ? "—" : `${roas.toFixed(1)}x`}
+                      </span>
+                    </>
+                  );
+                })()}
                 <ChevronRight className={`w-4 h-4 text-neutral-300 transition-transform ${aberto === r.nome ? "rotate-90" : ""}`} />
               </div>
             </button>
@@ -524,6 +570,9 @@ function Criativos({ pedidos, toques, modelo, clientePorId, onJornada }: {
           </div>
         ))}
       </div>
+      <p className="px-4 py-2.5 text-[11px] text-neutral-400 border-t border-neutral-100">
+        Gasto = Meta, sincronizado do go-live (15/07) em diante — casa por ad_id ou pelo nome do anúncio. Google entra quando o sufixo de URL estiver ativo. ROAS = receita atribuída ÷ gasto; verde ≥ 1x.
+      </p>
     </div>
   );
 }
