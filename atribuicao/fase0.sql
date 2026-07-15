@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS napan.atr_clientes (
   cnpj           text,
   cpf            text,
   nome           text,
+  telefone       text,
+  plataforma_id  text,               -- user_id do e-commerce (identidade mais estável que e-mail)
   criado_em      timestamptz NOT NULL DEFAULT now()
 );
 
@@ -132,12 +134,15 @@ BEGIN
   -- ===== IDENTIFY: costura vid → cliente (cadastro/login) =====
   ELSIF v_type = 'identify' THEN
     IF v_email = '' THEN RAISE EXCEPTION 'email requerido'; END IF;
-    INSERT INTO atr_clientes(email, cnpj, cpf, nome)
-    VALUES (v_email, payload->>'cnpj', payload->>'cpf', payload->>'nome')
+    INSERT INTO atr_clientes(email, cnpj, cpf, nome, telefone, plataforma_id)
+    VALUES (v_email, payload->>'cnpj', payload->>'cpf', payload->>'nome',
+            payload->>'telefone', payload->>'plataforma_id')
     ON CONFLICT (email) DO UPDATE SET
-      cnpj = coalesce(EXCLUDED.cnpj, atr_clientes.cnpj),
-      cpf  = coalesce(EXCLUDED.cpf,  atr_clientes.cpf),
-      nome = coalesce(EXCLUDED.nome, atr_clientes.nome)
+      cnpj          = coalesce(EXCLUDED.cnpj, atr_clientes.cnpj),
+      cpf           = coalesce(EXCLUDED.cpf,  atr_clientes.cpf),
+      nome          = coalesce(EXCLUDED.nome, atr_clientes.nome),
+      telefone      = coalesce(EXCLUDED.telefone, atr_clientes.telefone),
+      plataforma_id = coalesce(EXCLUDED.plataforma_id, atr_clientes.plataforma_id)
     RETURNING cliente_id INTO v_cliente;
     IF v_vid IS NOT NULL THEN
       INSERT INTO atr_visitantes(vid) VALUES (v_vid) ON CONFLICT DO NOTHING;
@@ -152,11 +157,15 @@ BEGIN
     IF v_pedido IS NULL OR v_pedido = '' THEN RAISE EXCEPTION 'pedido_id requerido'; END IF;
 
     IF v_email <> '' THEN
-      INSERT INTO atr_clientes(email, cnpj, cpf, nome)
-      VALUES (v_email, payload->>'cnpj', payload->>'cpf', payload->>'nome')
+      INSERT INTO atr_clientes(email, cnpj, cpf, nome, telefone, plataforma_id)
+      VALUES (v_email, payload->>'cnpj', payload->>'cpf', payload->>'nome',
+              payload->>'telefone', payload->>'plataforma_id')
       ON CONFLICT (email) DO UPDATE SET
-        cnpj = coalesce(EXCLUDED.cnpj, atr_clientes.cnpj),
-        cpf  = coalesce(EXCLUDED.cpf,  atr_clientes.cpf)
+        cnpj          = coalesce(EXCLUDED.cnpj, atr_clientes.cnpj),
+        cpf           = coalesce(EXCLUDED.cpf,  atr_clientes.cpf),
+        nome          = coalesce(EXCLUDED.nome, atr_clientes.nome),
+        telefone      = coalesce(EXCLUDED.telefone, atr_clientes.telefone),
+        plataforma_id = coalesce(EXCLUDED.plataforma_id, atr_clientes.plataforma_id)
       RETURNING cliente_id INTO v_cliente;
       IF v_vid IS NOT NULL THEN
         INSERT INTO atr_visitantes(vid) VALUES (v_vid) ON CONFLICT DO NOTHING;

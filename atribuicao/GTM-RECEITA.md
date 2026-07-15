@@ -76,30 +76,36 @@ URL tem `utm_*`/`fbclid`/`gclid`, ou seja, só no pageview de chegada de campanh
 </script>
 ```
 
-## 4. Tag 2 — "ATRIB · purchase" (Custom HTML)
+## 4. Tag 2 — "ATRIB · purchase" (Custom HTML) — ✅ FINAL (dataLayer real, 15/07/2026)
 
-**Acionador:** a página/evento de pedido confirmado. Duas opções — usar a que
-casar com o site:
-- **Opção A (evento do dataLayer):** acionador *Evento personalizado* =
-  `purchase` (se o site já dá `dataLayer.push({event:'purchase', ...})` — comum
-  quando há GA4 e-commerce). **Preferível.**
-- **Opção B (URL):** acionador *Page View* com filtro
-  `Page Path contém /pedido-confirmado` (⚠️ PREENCHER a URL real).
+**Acionador:** *Evento personalizado* → nome do evento: **`purchase`**
+(confirmado no dataLayer real do e-commerce).
 
-Antes, criar **variáveis de dataLayer** (tipo *Variável de camada de dados*):
+**Variáveis de dataLayer** (tipo *Variável de camada de dados*, versão 2) —
+nomes CONFIRMADOS no dump real:
 
-| Variável GTM | Nome no dataLayer (⚠️ PREENCHER com os reais) |
+| Variável GTM | Nome no dataLayer |
 |---|---|
-| `DL · pedido_id` | ex.: `ecommerce.transaction_id` |
-| `DL · valor` | ex.: `ecommerce.value` |
-| `DL · email` | ex.: `customer.email` |
-| `DL · cnpj` (se houver) | ex.: `customer.cnpj` |
-| `DL · produto` (opcional) | ex.: `ecommerce.items.0.item_name` |
+| `DL · pedido_id` | `ecommerce.purchase.transaction_id` |
+| `DL · valor` | `ecommerce.purchase.value` |
+| `DL · email` | `user_data.email` |
+| `DL · telefone` | `user_data.phone_number` |
+| `DL · nome` | `user_data.address.first_name` |
+| `DL · sobrenome` | `user_data.address.last_name` |
+| `DL · produto` | `ecommerce.purchase.items.0.item_name` |
+| `DL · user_id` | `user_id` |
+
+> O `user_id` da plataforma vira `plataforma_id` no banco — identidade mais
+> estável que e-mail. O `user_data` presente na compra faz a compra
+> **identificar sozinha** (não precisa de tag de login pra quem converte).
+
+Código FINAL da tag (colar como está):
 
 ```html
 <script>
 (function () {
   function getCookie(n){var m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():''}
+  var nome = [{{DL · nome}}, {{DL · sobrenome}}].filter(Boolean).join(' ');
   var payload = {
     token: '{{ATRIB · token}}',
     type: 'purchase',
@@ -107,7 +113,9 @@ Antes, criar **variáveis de dataLayer** (tipo *Variável de camada de dados*):
     pedido_id: String({{DL · pedido_id}} || ''),
     valor: String({{DL · valor}} || ''),
     email: {{DL · email}} || '',
-    cnpj: {{DL · cnpj}} || null,
+    nome: nome || null,
+    telefone: {{DL · telefone}} || null,
+    plataforma_id: String({{DL · user_id}} || '') || null,
     produto: {{DL · produto}} || null
   };
   if (!payload.pedido_id) return; // sem pedido, não envia
