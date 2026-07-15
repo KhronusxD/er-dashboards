@@ -22,6 +22,7 @@ type Pedido = {
   valor: number | null;
   produto: string | null;
   ocorrido_em: string;
+  vid_no_pedido?: string | null;
   primeiro_toque: Snapshot;
   ultimo_toque: Snapshot;
 };
@@ -36,7 +37,7 @@ type Toque = {
 };
 
 type Modelo = "primeiro" | "ultimo";
-type SubTab = "visao" | "origens" | "criativos" | "clientes";
+type SubTab = "visao" | "origens" | "criativos" | "pedidos" | "clientes";
 const SEM_ATRIB = "(sem origem registrada)";
 
 // ── Canais (paleta validada p/ daltonismo — dataviz) ─────────────────────────
@@ -82,7 +83,7 @@ export function AtribuicaoTab() {
         .select("id, vid, ocorrido_em, tipo, source, medium, campaign, content, term, campaign_id, adset_id, ad_id, fbclid, gclid, landing_url, device")
         .order("ocorrido_em", { ascending: false }).limit(3000),
       supabase.from("atr_pedidos")
-        .select("pedido_id, cliente_id, valor, produto, ocorrido_em, primeiro_toque, ultimo_toque")
+        .select("pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque")
         .order("ocorrido_em", { ascending: false }).limit(2000),
       supabase.from("atr_clientes").select("cliente_id, email, cnpj, nome").limit(3000),
     ]);
@@ -100,6 +101,7 @@ export function AtribuicaoTab() {
     { k: "visao", l: "Visão Geral", Ic: LayoutDashboard },
     { k: "origens", l: "Origens (UTMs)", Ic: Radio },
     { k: "criativos", l: "Criativos & Campanhas", Ic: Sparkles },
+    { k: "pedidos", l: "Pedidos", Ic: ShoppingCart },
     { k: "clientes", l: "Clientes", Ic: Users },
   ];
 
@@ -148,6 +150,7 @@ export function AtribuicaoTab() {
       {!vazio && sub === "visao" && <VisaoGeral toques={toques} pedidos={pedidos} modelo={modelo} />}
       {!vazio && sub === "origens" && <Origens toques={toques} />}
       {!vazio && sub === "criativos" && <Criativos pedidos={pedidos} toques={toques} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
+      {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidos} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "clientes" && <ClientesView pedidos={pedidos} clientes={clientes} onJornada={setJornadaDe} />}
 
       {loading && <p className="text-xs text-neutral-400">Carregando...</p>}
@@ -417,22 +420,26 @@ function Criativos({ pedidos, toques, modelo, clientePorId, onJornada }: {
     nivel === "criativo" ? (t.term || t.ad_id || t.campaign || SEM_ATRIB) : (t.campaign || t.campaign_id || SEM_ATRIB), [nivel]);
 
   const ranking = useMemo(() => {
-    const m: Record<string, { pedidos: Pedido[]; receita: number; clientes: Set<number | null>; toques: number; canal: CanalKey; adIds: Set<string> }> = {};
+    const m: Record<string, { pedidos: Pedido[]; receita: number; clientes: Set<number | null>; toques: number; canal: CanalKey; adIds: Set<string>; trouxe: number; fechou: number }> = {};
+    const linha = (key: string, canal: CanalKey) =>
+      (m[key] ??= { pedidos: [], receita: 0, clientes: new Set(), toques: 0, canal, adIds: new Set(), trouxe: 0, fechou: 0 });
     for (const t of toques) {
-      const key = chaveToque(t);
-      const r = (m[key] ??= { pedidos: [], receita: 0, clientes: new Set(), toques: 0, canal: canalDe(t.source, t.gclid, t.fbclid), adIds: new Set() });
+      const r = linha(chaveToque(t), canalDe(t.source, t.gclid, t.fbclid));
       r.toques += 1;
       if (t.ad_id) r.adIds.add(t.ad_id);
     }
     for (const p of pedidos) {
+      // papel de introdutor (1º toque) e fechador (último) — independentes do modelo
+      if (p.primeiro_toque) linha(chaveDe(p.primeiro_toque), canalDe(p.primeiro_toque.source)).trouxe += 1;
+      if (p.ultimo_toque) linha(chaveDe(p.ultimo_toque), canalDe(p.ultimo_toque.source)).fechou += 1;
+      // receita/pedidos/clientes seguem o modelo escolhido
       const snap = modelo === "primeiro" ? p.primeiro_toque : p.ultimo_toque;
-      const key = chaveDe(snap);
-      const r = (m[key] ??= { pedidos: [], receita: 0, clientes: new Set(), toques: 0, canal: snap ? canalDe(snap.source) : "direto", adIds: new Set() });
+      const r = linha(chaveDe(snap), snap ? canalDe(snap.source) : "direto");
       r.pedidos.push(p); r.receita += Number(p.valor) || 0; r.clientes.add(p.cliente_id);
       if (snap?.ad_id) r.adIds.add(snap.ad_id);
     }
     return Object.entries(m)
-      .map(([nome, r]) => ({ nome, nPedidos: r.pedidos.length, receita: r.receita, nClientes: r.clientes.size, toques: r.toques, canal: r.canal, adId: [...r.adIds][0] ?? null, pedidos: r.pedidos }))
+      .map(([nome, r]) => ({ nome, nPedidos: r.pedidos.length, receita: r.receita, nClientes: r.clientes.size, toques: r.toques, canal: r.canal, adId: [...r.adIds][0] ?? null, pedidos: r.pedidos, trouxe: r.trouxe, fechou: r.fechou }))
       .sort((a, b) => b.receita - a.receita || b.toques - a.toques);
   }, [toques, pedidos, chaveDe, chaveToque, modelo]);
   const maxReceita = Math.max(1, ...ranking.map((r) => r.receita));
@@ -458,6 +465,7 @@ function Criativos({ pedidos, toques, modelo, clientePorId, onJornada }: {
         <span className="w-24 text-right">Receita</span>
         <span className="w-16 text-right">Pedidos</span>
         <span className="w-16 text-right">Clientes</span>
+        <span className="w-20 text-right" title="Pedidos em que foi o 1º toque (introduziu) / o último (fechou)">Trouxe/Fechou</span>
         <span className="w-4" />
       </div>
 
@@ -481,6 +489,11 @@ function Criativos({ pedidos, toques, modelo, clientePorId, onJornada }: {
                 <span className="w-24 text-right text-sm font-semibold text-neutral-800">{brl(r.receita)}</span>
                 <span className="w-16 text-right text-sm text-neutral-600">{r.nPedidos}</span>
                 <span className="w-16 text-right text-sm text-neutral-600">{r.nClientes}</span>
+                <span className="w-20 text-right text-sm whitespace-nowrap" title="Trouxe (1º toque) / Fechou (último toque)">
+                  <span className="text-indigo-600 font-medium">{r.trouxe}</span>
+                  <span className="text-neutral-300"> / </span>
+                  <span className="text-emerald-600 font-medium">{r.fechou}</span>
+                </span>
                 <ChevronRight className={`w-4 h-4 text-neutral-300 transition-transform ${aberto === r.nome ? "rotate-90" : ""}`} />
               </div>
             </button>
@@ -511,6 +524,94 @@ function Criativos({ pedidos, toques, modelo, clientePorId, onJornada }: {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ═════════════════════════ SUB-ABA: PEDIDOS ═════════════════════════════════
+function PedidosView({ pedidos, clientePorId, onJornada }: {
+  pedidos: Pedido[]; clientePorId: Record<string, Cliente>; onJornada: (c: Cliente) => void;
+}) {
+  const [filtro, setFiltro] = useState<"todos" | "com" | "sem">("todos");
+  const lista = useMemo(() => pedidos.filter((p) =>
+    filtro === "todos" ? true : filtro === "com" ? !!p.primeiro_toque : !p.primeiro_toque), [pedidos, filtro]);
+
+  const ToqueCell = ({ s }: { s: Snapshot }) => {
+    if (!s) return <span className="text-neutral-300 italic">—</span>;
+    const k = canalDe(s.source);
+    return (
+      <span className="inline-flex items-center gap-1.5 max-w-[190px]">
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CANAIS[k].cor }} />
+        <span className="text-neutral-700 truncate">{s.term || s.campaign || CANAIS[k].label}</span>
+      </span>
+    );
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-neutral-200 flex items-center gap-3 flex-wrap">
+        <span className="text-sm font-semibold text-neutral-700">Todos os pedidos capturados</span>
+        <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">
+          {([["todos", "Todos"], ["com", "Com origem"], ["sem", "Sem origem"]] as const).map(([v, l]) => (
+            <button key={v} onClick={() => setFiltro(v)}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md ${filtro === v ? "bg-white text-indigo-700 shadow-sm border border-neutral-200" : "text-neutral-500"}`}>{l}</button>
+          ))}
+        </div>
+        <span className="text-xs text-neutral-400">{lista.length} pedido(s)</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
+              <th className="px-4 py-2">Pedido</th>
+              <th className="px-2 py-2">Cliente</th>
+              <th className="px-2 py-2 text-right">Valor</th>
+              <th className="px-2 py-2">1º toque (trouxe)</th>
+              <th className="px-2 py-2">Último toque (fechou)</th>
+              <th className="px-2 py-2 text-right">Tempo</th>
+              <th className="px-2 py-2 text-center" title="Cookie do visitante presente na compra">vid</th>
+              <th className="px-2 py-2" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-50">
+            {lista.map((p) => {
+              const c = p.cliente_id ? clientePorId[p.cliente_id] : null;
+              const multi = p.primeiro_toque && p.ultimo_toque && p.primeiro_toque.ocorrido_em !== p.ultimo_toque.ocorrido_em;
+              const tempo = p.primeiro_toque?.ocorrido_em ? dias(p.primeiro_toque.ocorrido_em, p.ocorrido_em) : null;
+              return (
+                <tr key={p.pedido_id} className="hover:bg-neutral-50">
+                  <td className="px-4 py-2.5">
+                    <div className="font-mono text-neutral-700">{p.pedido_id}</div>
+                    <div className="text-neutral-400 max-w-[180px] truncate">{p.produto || ""} · {dt(p.ocorrido_em)}</div>
+                  </td>
+                  <td className="px-2 py-2.5 text-neutral-700 max-w-[160px] truncate">{c?.nome || c?.email || <span className="text-neutral-300 italic">não identificado</span>}</td>
+                  <td className="px-2 py-2.5 text-right font-semibold text-neutral-800 whitespace-nowrap">{p.valor != null ? brl(Number(p.valor)) : "—"}</td>
+                  <td className="px-2 py-2.5"><ToqueCell s={p.primeiro_toque} /></td>
+                  <td className="px-2 py-2.5">
+                    <span className="inline-flex items-center gap-1.5">
+                      <ToqueCell s={p.ultimo_toque} />
+                      {multi && <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-1" title="Jornada multi-toque: o criativo que trouxe é diferente do que fechou">≠</span>}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2.5 text-right text-neutral-500 whitespace-nowrap">{tempo == null ? "—" : tempo < 1 ? "< 1d" : `${tempo.toFixed(0)}d`}</td>
+                  <td className={`px-2 py-2.5 text-center ${p.vid_no_pedido ? "text-emerald-600" : "text-neutral-300"}`}>{p.vid_no_pedido ? "✓" : "—"}</td>
+                  <td className="px-2 py-2.5 text-right">
+                    {c && (
+                      <button onClick={() => onJornada(c)}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded-md hover:bg-indigo-50">
+                        <Route className="w-3 h-3" /> Jornada
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="px-4 py-2.5 text-[11px] text-neutral-400 border-t border-neutral-100">
+        "Sem origem" = comprador entrou direto (recorrente) ou o toque é anterior ao rastreio. O ≠ marca jornadas multi-toque — criativo que trouxe difere do que fechou.
+      </p>
     </div>
   );
 }

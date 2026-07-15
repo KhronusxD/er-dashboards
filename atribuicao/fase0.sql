@@ -122,6 +122,18 @@ BEGIN
   -- ===== TOUCH: um toque de campanha =====
   IF v_type = 'touch' THEN
     IF v_vid IS NULL THEN RAISE EXCEPTION 'vid requerido'; END IF;
+    -- DEDUP: recarregar a landing (mesma origem, <30min) não é um toque novo
+    IF EXISTS (
+      SELECT 1 FROM atr_toques t
+      WHERE t.vid = v_vid
+        AND t.ocorrido_em > now() - interval '30 minutes'
+        AND coalesce(t.term,'')     = coalesce(payload->>'term','')
+        AND coalesce(t.campaign,'') = coalesce(payload->>'campaign','')
+        AND coalesce(t.source,'')   = coalesce(payload->>'source','')
+        AND coalesce(t.ad_id,'')    = coalesce(payload->>'ad_id','')
+    ) THEN
+      RETURN jsonb_build_object('ok', true, 'evento', 'touch', 'dedup', true);
+    END IF;
     INSERT INTO atr_visitantes(vid, primeira_lp, primeiro_ref, ua)
     VALUES (v_vid, payload->>'landing', payload->>'referrer', payload->>'ua')
     ON CONFLICT (vid) DO NOTHING;
