@@ -452,7 +452,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: 
           </table>
         </div>
         <p className="px-4 py-2.5 text-[11px] text-neutral-400 border-t border-neutral-100">
-          Plataforma atribui pela janela dela (ex.: 7 dias pós-clique, inclui modelagem) — a cobertura nunca será 100% e cresce com o tempo. Meta por enquanto; Google entra com o sufixo de URL ativo.
+          Plataforma atribui pela janela dela (ex.: 7 dias pós-clique, inclui modelagem) — a cobertura nunca será 100% e cresce com o tempo. Gasto: Meta (por anúncio) + Google (por campanha; dados atrasam ~1 dia). A atribuição do lado Google engata quando o sufixo de URL estiver ativo.
         </p>
       </div>
     </>
