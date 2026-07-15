@@ -41,7 +41,9 @@ URL tem `utm_*`/`fbclid`/`gclid`, ou seja, só no pageview de chegada de campanh
   // 1) garante o vid (fio condutor) — renova a validade a cada visita
   var vid = getCookie('nap_vid') || uuid();
   var d = new Date(); d.setTime(d.getTime() + 365*24*60*60*1000);
-  document.cookie = 'nap_vid=' + vid + '; expires=' + d.toUTCString() + '; path=/; SameSite=Lax; Secure';
+  // domain=.atualcard.com.br: o MESMO cookie vale em www., oferta., atualgraf. etc.
+  // (sem isso, toque num subdomínio e compra em outro nunca se ligam)
+  document.cookie = 'nap_vid=' + vid + '; expires=' + d.toUTCString() + '; path=/; domain=.atualcard.com.br; SameSite=Lax; Secure';
 
   // 2) só registra TOQUE quando chegou por campanha
   var p = new URLSearchParams(window.location.search);
@@ -154,8 +156,25 @@ Por quê:
 - **Não usamos `utm_id`** de propósito: o GA4 reserva esse parâmetro pra ID de
   campanha — usar pra ad quebraria o GA de vocês. `camp_id`/`adset_id`/`ad_id`
   são ignorados pelo GA.
-- Google Ads (futuro): equivalente via ValueTrack (`{creative}`, `{campaignid}`,
-  `{adgroupid}`) no sufixo de URL final — entra quando formos padronizar o Google.
+- Google Ads: ver §4c (template no nível da CONTA, resolve todas as campanhas de uma vez).
+
+## 4c. Template de URL no Google Ads (nível da conta)
+
+Diagnóstico (15/07): toques do Google chegam com `gclid` mas sem `term`/IDs —
+as campanhas não têm template consistente. Corrigir UMA vez no nível da conta:
+
+**Google Ads → Administrador/Configurações da conta → Sufixo do URL final:**
+
+```
+utm_source=google&utm_medium=paid&utm_campaign={campaignid}&camp_id={campaignid}&adset_id={adgroupid}&ad_id={creative}&utm_term={keyword}
+```
+
+- `{creative}` = ID do anúncio no Google → cai na MESMA coluna `ad_id` que o
+  Meta usa. `{keyword}` = termo de busca comprado → `utm_term`.
+- ValueTrack não expõe NOMES (só IDs) — os nomes a gente resolve depois via
+  API na hora do relatório (IDs são estáveis; nomes mudam).
+- Vale pra toda a conta; campanhas com template próprio (mais específico)
+  continuam prevalecendo.
 
 ## 5. O que precisamos do site (só olhar, não codar)
 
