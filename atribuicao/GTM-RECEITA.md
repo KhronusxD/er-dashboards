@@ -32,6 +32,10 @@ URL tem `utm_*`/`fbclid`/`gclid`, ou seja, só no pageview de chegada de campanh
 ```html
 <script>
 (function () {
+  // ESCOPO: só a loja principal. Os subdomínios (oferta., atualgraf., ...) são
+  // lojas white-label de REVENDEDORES — as campanhas deles não são mídia nossa
+  // e poluíam a atribuição. Fora do www, a tag nem executa.
+  if (location.hostname !== 'www.atualcard.com.br') return;
   function getCookie(n){var m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():''}
   function uuid(){
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -39,11 +43,11 @@ URL tem `utm_*`/`fbclid`/`gclid`, ou seja, só no pageview de chegada de campanh
     s[14]='4';s[19]=h[(parseInt(s[19],16)&3)|8];s[8]=s[13]=s[18]=s[23]='-';return s.join('');
   }
   // 1) garante o vid (fio condutor) — renova a validade a cada visita
+  // (cookie host-only do www: o apex 301-redireciona pro www preservando a query,
+  //  então não há fragmentação — verificado em 15/07)
   var vid = getCookie('nap_vid') || uuid();
   var d = new Date(); d.setTime(d.getTime() + 365*24*60*60*1000);
-  // domain=.atualcard.com.br: o MESMO cookie vale em www., oferta., atualgraf. etc.
-  // (sem isso, toque num subdomínio e compra em outro nunca se ligam)
-  document.cookie = 'nap_vid=' + vid + '; expires=' + d.toUTCString() + '; path=/; domain=.atualcard.com.br; SameSite=Lax; Secure';
+  document.cookie = 'nap_vid=' + vid + '; expires=' + d.toUTCString() + '; path=/; SameSite=Lax; Secure';
 
   // 2) só registra TOQUE quando chegou por campanha
   var p = new URLSearchParams(window.location.search);
@@ -110,6 +114,8 @@ Código FINAL da tag (colar como está):
 ```html
 <script>
 (function () {
+  // Mesma trava de escopo da Tag 1: compra só conta na loja principal
+  if (location.hostname !== 'www.atualcard.com.br') return;
   function getCookie(n){var m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():''}
   var nome = [{{DL · nome}}, {{DL · sobrenome}}].filter(Boolean).join(' ');
   var payload = {
