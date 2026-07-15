@@ -198,9 +198,12 @@ BEGIN
       SELECT vid FROM atr_identidades WHERE cliente_id = v_cliente
       UNION SELECT v_vid WHERE v_vid IS NOT NULL
     ), tq AS (
+      -- só cliques de ANÚNCIO contam pra crédito de 1º/último toque;
+      -- toques orgânicos/diretos ficam na jornada mas não levam atribuição paga
       SELECT t.source, t.medium, t.campaign, t.content, t.term,
              t.campaign_id, t.adset_id, t.ad_id, t.ocorrido_em
       FROM atr_toques t JOIN vids USING (vid)
+      WHERE coalesce(t.tipo, 'ad_click') = 'ad_click'
     )
     SELECT
       (SELECT to_jsonb(a) FROM (SELECT * FROM tq ORDER BY ocorrido_em ASC  LIMIT 1) a),
@@ -234,6 +237,8 @@ CREATE TABLE IF NOT EXISTS napan.atr_gastos (
   ad_id text, ad_name text,
   gasto numeric NOT NULL DEFAULT 0,
   impressoes bigint, cliques bigint,
+  plataforma_compras bigint,      -- compras que a PLATAFORMA reporta (comparação)
+  plataforma_receita numeric,     -- receita que a PLATAFORMA reporta
   atualizado_em timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS atr_gastos_unq ON napan.atr_gastos(dia, canal, coalesce(ad_id,''), coalesce(campaign_id,''));

@@ -27,7 +27,10 @@ type Pedido = {
   ultimo_toque: Snapshot;
 };
 type Cliente = { cliente_id: number; email: string; cnpj: string | null; nome: string | null };
-type Gasto = { dia: string; canal: string; campaign_id: string | null; campaign_name: string | null; ad_id: string | null; ad_name: string | null; gasto: number };
+type Gasto = { dia: string; canal: string; campaign_id: string | null; campaign_name: string | null; ad_id: string | null; ad_name: string | null; gasto: number; plataforma_compras: number | null; plataforma_receita: number | null };
+
+// toque de ANÚNCIO (pago) vs orgânico/direto (pistas — não levam crédito pago)
+const isAd = (t: Toque) => (t.tipo ?? "ad_click") === "ad_click";
 type Toque = {
   id: number; vid: string; ocorrido_em: string; tipo: string | null;
   source: string | null; medium: string | null; campaign: string | null;
@@ -78,19 +81,35 @@ export function AtribuicaoTab() {
   const [modelo, setModelo] = useState<Modelo>("primeiro");
   const [jornadaDe, setJornadaDe] = useState<Cliente | null>(null);
 
+  const [totalToques, setTotalToques] = useState(0);
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: tq }, { data: peds }, { data: clis }, { data: gst }] = await Promise.all([
-      supabase.from("atr_toques")
-        .select("id, vid, ocorrido_em, tipo, source, medium, campaign, content, term, campaign_id, adset_id, ad_id, fbclid, gclid, landing_url, device")
-        .order("ocorrido_em", { ascending: false }).limit(3000),
+    // toques: o PostgREST corta em 1000 linhas por request — paginar de verdade
+    const cols = "id, vid, ocorrido_em, tipo, source, medium, campaign, content, term, campaign_id, adset_id, ad_id, fbclid, gclid, landing_url, device";
+    const pagina = (i: number) => supabase.from("atr_toques").select(cols)
+      .order("ocorrido_em", { ascending: false }).range(i * 1000, i * 1000 + 999);
+    const carregaToques = async () => {
+      let tudo: Toque[] = [];
+      for (let i = 0; i < 15; i++) {              // até 15k toques
+        const { data } = await pagina(i);
+        const chunk = (data as any) ?? [];
+        tudo = tudo.concat(chunk);
+        if (chunk.length < 1000) break;
+      }
+      return tudo;
+    };
+    const [tq, { count }, { data: peds }, { data: clis }, { data: gst }] = await Promise.all([
+      carregaToques(),
+      supabase.from("atr_toques").select("id", { count: "exact", head: true }),
       supabase.from("atr_pedidos")
         .select("pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque")
         .order("ocorrido_em", { ascending: false }).limit(2000),
       supabase.from("atr_clientes").select("cliente_id, email, cnpj, nome").limit(3000),
-      supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, ad_id, ad_name, gasto").limit(8000),
+      supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, ad_id, ad_name, gasto, plataforma_compras, plataforma_receita").limit(8000),
     ]);
     setToques((tq as any) ?? []);
+    setTotalToques(count ?? (tq as any[]).length);
     setPedidos((peds as any) ?? []);
     setClientes((clis as any) ?? []);
     setGastos((gst as any) ?? []);
@@ -151,7 +170,7 @@ export function AtribuicaoTab() {
         </div>
       )}
 
-      {!vazio && sub === "visao" && <VisaoGeral toques={toques} pedidos={pedidos} modelo={modelo} />}
+      {!vazio && sub === "visao" && <VisaoGeral toques={toques} pedidos={pedidos} gastos={gastos} modelo={modelo} totalToques={totalToques} />}
       {!vazio && sub === "origens" && <Origens toques={toques} />}
       {!vazio && sub === "criativos" && <Criativos pedidos={pedidos} toques={toques} gastos={gastos} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidos} clientePorId={clientePorId} onJornada={setJornadaDe} />}
@@ -164,7 +183,7 @@ export function AtribuicaoTab() {
 }
 
 // ═════════════════════════ SUB-ABA: VISÃO GERAL ═════════════════════════════
-function VisaoGeral({ toques, pedidos, modelo }: { toques: Toque[]; pedidos: Pedido[]; modelo: Modelo }) {
+function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: Toque[]; pedidos: Pedido[]; gastos: Gasto[]; modelo: Modelo; totalToques: number }) {
   const receita = useMemo(() => pedidos.reduce((s, p) => s + (Number(p.valor) || 0), 0), [pedidos]);
   const clientesUnicos = useMemo(() => new Set(pedidos.map((p) => p.cliente_id).filter(Boolean)).size, [pedidos]);
   const comOrigem = useMemo(() => pedidos.filter((p) => p.primeiro_toque).length, [pedidos]);
@@ -186,6 +205,7 @@ function VisaoGeral({ toques, pedidos, modelo }: { toques: Toque[]; pedidos: Ped
     const base = diasArr.map((d) => ({ label: d.label, dia: d.dia, google: 0, meta: 0, teste: 0, outros: 0, direto: 0 }));
     const idx = Object.fromEntries(base.map((b, i) => [b.dia, i]));
     for (const t of toques) {
+      if (!isAd(t)) continue;                       // gráfico = toques de anúncio
       const k = diaKey(t.ocorrido_em);
       if (idx[k] == null) continue;
       (base[idx[k]] as any)[canalDe(t.source, t.gclid, t.fbclid)] += 1;
@@ -196,7 +216,7 @@ function VisaoGeral({ toques, pedidos, modelo }: { toques: Toque[]; pedidos: Ped
   // Donut por canal (toques) + receita por canal (pedidos, modelo escolhido)
   const porCanalToques = useMemo(() => {
     const m: Record<CanalKey, number> = { google: 0, meta: 0, teste: 0, outros: 0, direto: 0 };
-    for (const t of toques) m[canalDe(t.source, t.gclid, t.fbclid)] += 1;
+    for (const t of toques) { if (isAd(t)) m[canalDe(t.source, t.gclid, t.fbclid)] += 1; }
     return (Object.keys(CANAIS) as CanalKey[]).map((k) => ({ k, name: CANAIS[k].label, value: m[k], cor: CANAIS[k].cor })).filter((x) => x.value > 0);
   }, [toques]);
 
@@ -217,11 +237,63 @@ function VisaoGeral({ toques, pedidos, modelo }: { toques: Toque[]; pedidos: Ped
 
   const canaisPresentes = (Object.keys(CANAIS) as CanalKey[]).filter((k) => serieDiaria.some((d) => (d as any)[k] > 0));
 
+  // Pedidos por dia (14d) — a leitura principal: com origem (por canal) vs sem origem (cinza)
+  const pedidosSerie = useMemo(() => {
+    const hoje = new Date();
+    const base: any[] = []; const idx: Record<string, number> = {};
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(hoje); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10); idx[key] = base.length;
+      base.push({ label: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`, google: 0, meta: 0, teste: 0, outros: 0, direto: 0 });
+    }
+    for (const p of pedidos) {
+      const k = diaKey(p.ocorrido_em);
+      if (idx[k] == null) continue;
+      base[idx[k]][p.primeiro_toque ? canalDe(p.primeiro_toque.source) : "direto"] += 1;
+    }
+    return base;
+  }, [pedidos]);
+  const canaisPedidos = (Object.keys(CANAIS) as CanalKey[]).filter((k) => pedidosSerie.some((d) => d[k] > 0));
+
+  // Pistas: de onde vêm os "diretos" (toques orgânicos/referral — tag v3)
+  const pistas = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const t of toques) { if (isAd(t)) continue; const k = t.source || "(direto, sem referrer)"; m[k] = (m[k] ?? 0) + 1; }
+    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  }, [toques]);
+
+  // Campanhas: o que a PLATAFORMA reporta × o que a ATRIBUIÇÃO já enxerga
+  const campanhas = useMemo(() => {
+    const m: Record<string, { nome: string; gasto: number; pCompras: number; pReceita: number }> = {};
+    for (const g of gastos) {
+      const key = g.campaign_id || g.campaign_name || "?";
+      const r = (m[key] ??= { nome: g.campaign_name || key, gasto: 0, pCompras: 0, pReceita: 0 });
+      r.gasto += Number(g.gasto) || 0;
+      r.pCompras += Number(g.plataforma_compras) || 0;
+      r.pReceita += Number(g.plataforma_receita) || 0;
+    }
+    const nomeIdx: Record<string, string> = {};
+    for (const key of Object.keys(m)) nomeIdx[m[key].nome.trim().toLowerCase()] = key;
+    const atrib: Record<string, { compras: number; receita: number }> = {};
+    for (const p of pedidos) {
+      const s = modelo === "primeiro" ? p.primeiro_toque : p.ultimo_toque;
+      if (!s) continue;
+      const key = (s.campaign_id && m[s.campaign_id]) ? s.campaign_id : nomeIdx[(s.campaign || "").trim().toLowerCase()];
+      if (!key) continue;
+      const a = (atrib[key] ??= { compras: 0, receita: 0 });
+      a.compras += 1; a.receita += Number(p.valor) || 0;
+    }
+    return Object.entries(m)
+      .map(([key, r]) => ({ key, ...r, aCompras: atrib[key]?.compras ?? 0, aReceita: atrib[key]?.receita ?? 0 }))
+      .filter((c) => c.gasto > 0)
+      .sort((a, b) => b.gasto - a.gasto).slice(0, 12);
+  }, [gastos, pedidos, modelo]);
+
   return (
     <>
       {/* KPIs primários */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-        <Kpi icone={<MousePointerClick className="w-4 h-4" />} rotulo="Toques" valor={String(toques.length)} />
+        <Kpi icone={<MousePointerClick className="w-4 h-4" />} rotulo="Toques" valor={String(totalToques)} />
         <Kpi icone={<ShoppingCart className="w-4 h-4" />} rotulo="Pedidos" valor={String(pedidos.length)} />
         <Kpi icone={<Percent className="w-4 h-4" />} rotulo="Pedidos c/ origem" valor={`${pctOrigem}%`} destaque={pctOrigem < 30 ? "baixo — cresce com o tempo" : undefined} />
         <Kpi icone={<Receipt className="w-4 h-4" />} rotulo="Receita" valor={brl(receita)} />
@@ -296,6 +368,91 @@ function VisaoGeral({ toques, pedidos, modelo }: { toques: Toque[]; pedidos: Ped
           </div>
         </div>
       </div>
+
+      {/* Pedidos por dia (leitura principal) + pistas dos diretos */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-sm font-semibold text-neutral-700">Pedidos por dia · com origem (1º toque) vs direto</h3>
+            <Legenda canais={canaisPedidos} />
+          </div>
+          <div style={{ height: 200 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={pedidosSerie} barCategoryGap="28%">
+                <CartesianGrid vertical={false} stroke="#f1f2f4" />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} width={26} />
+                <RTooltip contentStyle={{ borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 12 }} cursor={{ fill: "rgba(99,102,241,0.05)" }} />
+                {canaisPedidos.map((k) => (
+                  <Bar key={k} dataKey={k} name={CANAIS[k].label} stackId="p" fill={CANAIS[k].cor} stroke="#ffffff" strokeWidth={1} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="text-[11px] text-neutral-400 mt-1">Cinza = sem origem (direto/recorrente ou anterior ao rastreio). A fatia colorida é a que cresce conforme a cobertura melhora.</p>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
+          <h3 className="text-sm font-semibold text-neutral-700">Pistas dos "diretos"</h3>
+          <p className="text-[11px] text-neutral-400 mb-3">De onde vêm as visitas SEM anúncio (orgânico, indicação, IA, bio...).</p>
+          {pistas.length === 0 ? (
+            <p className="text-xs text-neutral-400 py-3">Ativa com a Tag 1 v3 (§3 da receita) republicada — aí todo 1º acesso da sessão registra o referrer.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {pistas.map(([s, n]) => (
+                <div key={s} className="flex items-center gap-2 text-xs">
+                  <span className="w-2 h-2 rounded-full shrink-0 bg-neutral-400" />
+                  <span className="font-mono text-neutral-700 flex-1 truncate">{s}</span>
+                  <span className="font-semibold text-neutral-800">{n}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Campanhas: plataforma × atribuição */}
+      <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden mt-4">
+        <div className="px-4 py-3 border-b border-neutral-200 flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-neutral-700">Campanhas — plataforma × atribuição</span>
+          <span className="text-xs text-neutral-400">· o que o gerenciador reporta vs o que a atribuição já enxerga (modelo: {modelo === "primeiro" ? "1º toque" : "último toque"})</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
+                <th className="px-4 py-2">Campanha</th>
+                <th className="px-2 py-2 text-right">Gasto</th>
+                <th className="px-2 py-2 text-right" title="Compras que o gerenciador atribui (janela da plataforma)">Compras (plat.)</th>
+                <th className="px-2 py-2 text-right">Receita (plat.)</th>
+                <th className="px-2 py-2 text-right" title="Pedidos que NOSSA atribuição ligou a esta campanha">Compras (atrib.)</th>
+                <th className="px-2 py-2 text-right">Receita (atrib.)</th>
+                <th className="px-2 py-2 text-right" title="Compras da atribuição ÷ compras da plataforma">Cobertura</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-50">
+              {campanhas.map((c) => {
+                const cob = c.pCompras > 0 ? (c.aCompras / c.pCompras) * 100 : null;
+                return (
+                  <tr key={c.key} className="hover:bg-neutral-50">
+                    <td className="px-4 py-2.5 text-neutral-800 font-medium max-w-[260px] truncate" title={c.nome}>{c.nome}</td>
+                    <td className="px-2 py-2.5 text-right text-neutral-600 whitespace-nowrap">{brl(c.gasto)}</td>
+                    <td className="px-2 py-2.5 text-right text-neutral-600">{c.pCompras}</td>
+                    <td className="px-2 py-2.5 text-right text-neutral-600 whitespace-nowrap">{brl(c.pReceita)}</td>
+                    <td className="px-2 py-2.5 text-right font-semibold text-indigo-700">{c.aCompras}</td>
+                    <td className="px-2 py-2.5 text-right font-semibold text-indigo-700 whitespace-nowrap">{brl(c.aReceita)}</td>
+                    <td className={`px-2 py-2.5 text-right font-semibold ${cob == null ? "text-neutral-300" : cob >= 50 ? "text-emerald-600" : "text-amber-600"}`}>{cob == null ? "—" : `${cob.toFixed(0)}%`}</td>
+                  </tr>
+                );
+              })}
+              {campanhas.length === 0 && <tr><td colSpan={7} className="px-4 py-4 text-neutral-400">Sem gasto sincronizado ainda — rodar o sync do Meta.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <p className="px-4 py-2.5 text-[11px] text-neutral-400 border-t border-neutral-100">
+          Plataforma atribui pela janela dela (ex.: 7 dias pós-clique, inclui modelagem) — a cobertura nunca será 100% e cresce com o tempo. Meta por enquanto; Google entra com o sufixo de URL ativo.
+        </p>
+      </div>
     </>
   );
 }
@@ -354,6 +511,7 @@ function Origens({ toques }: { toques: Toque[] }) {
                 <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
                   <th className="px-4 py-2">Quando</th>
                   <th className="px-2 py-2">Canal</th>
+                  <th className="px-2 py-2">Tipo</th>
                   <th className="px-2 py-2">Campanha</th>
                   <th className="px-2 py-2">Criativo / termo</th>
                   <th className="px-2 py-2">ad_id</th>
@@ -372,6 +530,13 @@ function Origens({ toques }: { toques: Toque[] }) {
                           <span className="text-neutral-700 font-medium">{CANAIS[k].label}</span>
                           <span className="text-neutral-400">({t.source || (t.gclid ? "gclid" : t.fbclid ? "fbclid" : "—")})</span>
                         </span>
+                      </td>
+                      <td className="px-2 py-2 whitespace-nowrap">
+                        {(() => {
+                          const tp = t.tipo ?? "ad_click";
+                          const cfg = tp === "ad_click" ? { l: "anúncio", c: "#6366f1" } : tp === "referral" ? { l: "orgânico", c: "#0d9488" } : { l: "direto", c: "#94a3b8" };
+                          return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ color: cfg.c, background: `${cfg.c}18` }}>{cfg.l}</span>;
+                        })()}
                       </td>
                       <td className="px-2 py-2 text-neutral-600 max-w-[160px] truncate">{t.campaign || t.campaign_id || "—"}</td>
                       <td className="px-2 py-2 text-neutral-800 font-medium max-w-[200px] truncate">{t.term || t.content || "—"}</td>
@@ -479,6 +644,7 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
     const linha = (key: string, canal: CanalKey) =>
       (m[key] ??= { pedidos: [], receita: 0, clientes: new Set(), toques: 0, canal, adIds: new Set(), trouxe: 0, fechou: 0 });
     for (const t of toques) {
+      if (!isAd(t)) continue;                      // ranking pago: só cliques de anúncio
       const r = linha(chaveToque(t), canalDe(t.source, t.gclid, t.fbclid));
       r.toques += 1;
       if (t.ad_id) r.adIds.add(t.ad_id);
@@ -497,8 +663,13 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
       .map(([nome, r]) => ({ nome, nPedidos: r.pedidos.length, receita: r.receita, nClientes: r.clientes.size, toques: r.toques, canal: r.canal, adId: [...r.adIds][0] ?? null, pedidos: r.pedidos, trouxe: r.trouxe, fechou: r.fechou }))
       .sort((a, b) => b.receita - a.receita || b.toques - a.toques);
   }, [toques, pedidos, chaveDe, chaveToque, modelo]);
-  const maxReceita = Math.max(1, ...ranking.map((r) => r.receita));
-  const linhaAberta = ranking.find((r) => r.nome === aberto) ?? null;
+  const [origemFiltro, setOrigemFiltro] = useState<"todos" | "com" | "sem">("todos");
+  const linhasRank = useMemo(() =>
+    origemFiltro === "todos" ? ranking
+      : origemFiltro === "com" ? ranking.filter((r) => r.nome !== SEM_ATRIB)
+      : ranking.filter((r) => r.nome === SEM_ATRIB), [ranking, origemFiltro]);
+  const maxReceita = Math.max(1, ...linhasRank.map((r) => r.receita));
+  const linhaAberta = linhasRank.find((r) => r.nome === aberto) ?? null;
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
@@ -511,6 +682,13 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
           ))}
         </div>
         <span className="text-xs text-neutral-400">· modelo: {modelo === "primeiro" ? "1º toque (quem trouxe)" : "último toque (quem fechou)"}</span>
+        <div className="flex-1" />
+        <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">
+          {([["todos", "Todos"], ["com", "Com origem"], ["sem", "Sem origem"]] as const).map(([v, l]) => (
+            <button key={v} onClick={() => { setOrigemFiltro(v); setAberto(null); }}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md ${origemFiltro === v ? "bg-white text-indigo-700 shadow-sm border border-neutral-200" : "text-neutral-500"}`}>{l}</button>
+          ))}
+        </div>
       </div>
 
       {/* Cabeçalho de colunas */}
@@ -527,7 +705,7 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
       </div>
 
       <div className="divide-y divide-neutral-100">
-        {ranking.map((r) => (
+        {linhasRank.map((r) => (
           <div key={r.nome}>
             <button onClick={() => setAberto(aberto === r.nome ? null : r.nome)}
               className={`w-full text-left px-4 py-3 hover:bg-neutral-50 transition-colors ${aberto === r.nome ? "bg-indigo-50/50" : ""}`}>
@@ -692,6 +870,7 @@ function PedidosView({ pedidos, clientePorId, onJornada }: {
 function ClientesView({ pedidos, clientes, onJornada }: {
   pedidos: Pedido[]; clientes: Cliente[]; onJornada: (c: Cliente) => void;
 }) {
+  const [origemFiltro, setOrigemFiltro] = useState<"todos" | "com" | "sem">("todos");
   const linhas = useMemo(() => {
     const m: Record<number, { pedidos: number; receita: number; primeiro: Snapshot; primeiraCompra: string }> = {};
     for (const p of [...pedidos].sort((a, b) => a.ocorrido_em.localeCompare(b.ocorrido_em))) {
@@ -703,14 +882,21 @@ function ClientesView({ pedidos, clientes, onJornada }: {
     return clientes
       .filter((c) => m[c.cliente_id])
       .map((c) => ({ c, ...m[c.cliente_id] }))
+      .filter((l) => origemFiltro === "todos" ? true : origemFiltro === "com" ? !!l.primeiro : !l.primeiro)
       .sort((a, b) => b.receita - a.receita);
-  }, [pedidos, clientes]);
+  }, [pedidos, clientes, origemFiltro]);
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-neutral-200 flex items-center gap-3 flex-wrap">
         <span className="text-sm font-semibold text-neutral-700">Clientes identificados</span>
-        <span className="text-xs text-neutral-400">{linhas.length}</span>
+        <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">
+          {([["todos", "Todos"], ["com", "Com origem"], ["sem", "Sem origem"]] as const).map(([v, l]) => (
+            <button key={v} onClick={() => setOrigemFiltro(v)}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md ${origemFiltro === v ? "bg-white text-indigo-700 shadow-sm border border-neutral-200" : "text-neutral-500"}`}>{l}</button>
+          ))}
+        </div>
+        <span className="text-xs text-neutral-400 ml-auto">{linhas.length}</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">

@@ -33,7 +33,7 @@ while : ; do
   if [ -z "$NEXT" ]; then
     curl -s -m 60 -G "$URL" \
       --data-urlencode "level=ad" \
-      --data-urlencode "fields=ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks" \
+      --data-urlencode "fields=ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks,actions,action_values" \
       --data-urlencode "time_range={\"since\":\"$SINCE\",\"until\":\"$UNTIL\"}" \
       --data-urlencode "time_increment=1" \
       --data-urlencode "limit=500" \
@@ -60,21 +60,31 @@ echo "→ ${N} linhas anúncio-dia baixadas"
 python3 - << 'PY'
 import json
 def esc(s): return (s or '').replace("'", "''")
+def acao(lista, tipos):
+    # pega a 1ª action que casar (omni_purchase cobre pixel+app+loja; evita dupla contagem)
+    m = {a.get('action_type'): a.get('value') for a in (lista or [])}
+    for t in tipos:
+        if t in m: return float(m[t] or 0)
+    return 0.0
 vals = []
 for line in open('/tmp/atr_gastos_rows.jsonl'):
     r = json.loads(line)
-    vals.append("('{}','meta','{}','{}','{}','{}','{}','{}',{},{},{})".format(
+    compras  = acao(r.get('actions'),       ['omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase'])
+    receita  = acao(r.get('action_values'), ['omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase'])
+    vals.append("('{}','meta','{}','{}','{}','{}','{}','{}',{},{},{},{},{})".format(
         r.get('date_start'), esc(r.get('campaign_id')), esc(r.get('campaign_name')),
         esc(r.get('adset_id')), esc(r.get('adset_name')),
         esc(r.get('ad_id')), esc(r.get('ad_name')),
-        float(r.get('spend') or 0), int(r.get('impressions') or 0), int(r.get('clicks') or 0)))
+        float(r.get('spend') or 0), int(r.get('impressions') or 0), int(r.get('clicks') or 0),
+        int(compras), receita))
 if not vals:
     open('/tmp/atr_gastos_upsert.sql','w').write('select 1;')
 else:
-    sql = ("INSERT INTO napan.atr_gastos (dia, canal, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, gasto, impressoes, cliques)\nVALUES\n"
+    sql = ("INSERT INTO napan.atr_gastos (dia, canal, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, gasto, impressoes, cliques, plataforma_compras, plataforma_receita)\nVALUES\n"
            + ",\n".join(vals)
            + "\nON CONFLICT (dia, canal, coalesce(ad_id,''), coalesce(campaign_id,'')) DO UPDATE SET\n"
            "  gasto = EXCLUDED.gasto, impressoes = EXCLUDED.impressoes, cliques = EXCLUDED.cliques,\n"
+           "  plataforma_compras = EXCLUDED.plataforma_compras, plataforma_receita = EXCLUDED.plataforma_receita,\n"
            "  ad_name = EXCLUDED.ad_name, campaign_name = EXCLUDED.campaign_name,\n"
            "  adset_id = EXCLUDED.adset_id, adset_name = EXCLUDED.adset_name, atualizado_em = now();")
     open('/tmp/atr_gastos_upsert.sql','w').write(sql)

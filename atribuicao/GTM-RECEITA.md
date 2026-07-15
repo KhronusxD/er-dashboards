@@ -26,15 +26,20 @@
 
 ## 3. Tag 1 — "ATRIB · vid + touch" (Custom HTML)
 
-**Acionador:** All Pages (a própria tag decide se envia — só envia quando a
-URL tem `utm_*`/`fbclid`/`gclid`, ou seja, só no pageview de chegada de campanha).
+**Acionador:** All Pages. A tag decide o que envia:
+- chegada por **campanha** (`utm`/`fbclid`/`gclid`) → toque `ad_click` (sempre);
+- chegada **orgânica/direta** → 1 toque por sessão (`referral`/`direct`) — são
+  as "pistas" de onde vêm os clientes sem anúncio (Google orgânico, Instagram
+  bio, ChatGPT, direto...). Não levam crédito de atribuição paga (o servidor
+  só considera `ad_click` no 1º/último toque do pedido).
+
+**v3 (15/07):** + decodificação de UTMs com duplo-encoding (`%5B`→`[`, `+`→espaço)
+e captura de orgânico/direto.
 
 ```html
 <script>
 (function () {
-  // ESCOPO: só a loja principal. Os subdomínios (oferta., atualgraf., ...) são
-  // lojas white-label de REVENDEDORES — as campanhas deles não são mídia nossa
-  // e poluíam a atribuição. Fora do www, a tag nem executa.
+  // ESCOPO: só a loja principal (subdomínios são lojas de REVENDEDORES).
   if (location.hostname !== 'www.atualcard.com.br') return;
   function getCookie(n){var m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():''}
   function uuid(){
@@ -42,34 +47,42 @@ URL tem `utm_*`/`fbclid`/`gclid`, ou seja, só no pageview de chegada de campanh
     var s=[],h='0123456789abcdef';for(var i=0;i<36;i++)s[i]=h[Math.floor(Math.random()*16)];
     s[14]='4';s[19]=h[(parseInt(s[19],16)&3)|8];s[8]=s[13]=s[18]=s[23]='-';return s.join('');
   }
-  // 1) garante o vid (fio condutor) — renova a validade a cada visita
-  // (cookie host-only do www: o apex 301-redireciona pro www preservando a query,
-  //  então não há fragmentação — verificado em 15/07)
+  // conserta UTM com duplo-encoding (plataformas às vezes mandam %5B, '+', etc.)
+  function deco(v){ if(!v) return v; try { v = v.replace(/\+/g,' '); return v.indexOf('%') > -1 ? decodeURIComponent(v) : v; } catch(e){ return v; } }
+
+  // 1) garante o vid (fio condutor)
   var vid = getCookie('nap_vid') || uuid();
   var d = new Date(); d.setTime(d.getTime() + 365*24*60*60*1000);
   document.cookie = 'nap_vid=' + vid + '; expires=' + d.toUTCString() + '; path=/; SameSite=Lax; Secure';
 
-  // 2) só registra TOQUE quando chegou por campanha
+  // 2) decide o tipo do toque
   var p = new URLSearchParams(window.location.search);
   var temCampanha = p.get('utm_source') || p.get('fbclid') || p.get('gclid');
-  if (!temCampanha) return;
+  var jaNaSessao = false; try { jaNaSessao = sessionStorage.getItem('nap_t') === '1'; } catch(e) {}
+  var ref = document.referrer || '';
+  var refExterno = ref !== '' && ref.indexOf('atualcard.com.br') === -1;
+  if (!temCampanha && jaNaSessao) return;   // orgânico/direto: só o 1º pageview da sessão
+  try { sessionStorage.setItem('nap_t', '1'); } catch(e) {}
+  var tipo = temCampanha ? 'ad_click' : (refExterno ? 'referral' : 'direct');
+  var refHost = ''; try { refHost = ref ? new URL(ref).hostname.replace(/^www\./,'') : ''; } catch(e) {}
 
   var payload = {
     token: '{{ATRIB · token}}',
     type: 'touch',
     vid: vid,
-    source: p.get('utm_source') || (p.get('gclid') ? 'google' : 'facebook'),
-    medium: p.get('utm_medium'),
-    campaign: p.get('utm_campaign'),
-    content: p.get('utm_content'),
-    term: p.get('utm_term'),
+    tipo: tipo,
+    source: deco(p.get('utm_source')) || (p.get('gclid') ? 'google' : (p.get('fbclid') ? 'facebook' : (refHost || null))),
+    medium: deco(p.get('utm_medium')) || (temCampanha ? null : (refExterno ? 'referral' : 'direct')),
+    campaign: deco(p.get('utm_campaign')),
+    content: deco(p.get('utm_content')),
+    term: deco(p.get('utm_term')),
     campaign_id: p.get('camp_id'),
     adset_id: p.get('adset_id'),
     ad_id: p.get('ad_id'),
     fbclid: p.get('fbclid'),
     gclid: p.get('gclid'),
     landing: location.href.split('#')[0].substring(0, 500),
-    referrer: (document.referrer || '').substring(0, 300),
+    referrer: ref.substring(0, 300),
     device: /iPhone|iPad|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
     ua: navigator.userAgent.substring(0, 200)
   };
