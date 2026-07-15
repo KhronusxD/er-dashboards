@@ -80,6 +80,7 @@ export function AtribuicaoTab() {
   const [loading, setLoading] = useState(true);
   const [modelo, setModelo] = useState<Modelo>("primeiro");
   const [jornadaDe, setJornadaDe] = useState<Cliente | null>(null);
+  const [vidAberto, setVidAberto] = useState<string | null>(null);
 
   const [totalToques, setTotalToques] = useState(0);
 
@@ -171,13 +172,14 @@ export function AtribuicaoTab() {
       )}
 
       {!vazio && sub === "visao" && <VisaoGeral toques={toques} pedidos={pedidos} gastos={gastos} modelo={modelo} totalToques={totalToques} />}
-      {!vazio && sub === "origens" && <Origens toques={toques} />}
+      {!vazio && sub === "origens" && <Origens toques={toques} pedidos={pedidos} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
       {!vazio && sub === "criativos" && <Criativos pedidos={pedidos} toques={toques} gastos={gastos} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidos} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "clientes" && <ClientesView pedidos={pedidos} clientes={clientes} onJornada={setJornadaDe} />}
 
       {loading && <p className="text-xs text-neutral-400">Carregando...</p>}
       {jornadaDe && <JornadaDrawer cliente={jornadaDe} onClose={() => setJornadaDe(null)} />}
+      {vidAberto && <VidDrawer vid={vidAberto} onClose={() => setVidAberto(null)} />}
     </div>
   );
 }
@@ -458,28 +460,52 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: 
 }
 
 // ═════════════════════════ SUB-ABA: ORIGENS (UTMs) ══════════════════════════
-function Origens({ toques }: { toques: Toque[] }) {
+function Origens({ toques, pedidos, modelo, clientePorId, onAbrirVid, onJornada }: {
+  toques: Toque[]; pedidos: Pedido[]; modelo: Modelo;
+  clientePorId: Record<string, Cliente>;
+  onAbrirVid: (vid: string) => void; onJornada: (c: Cliente) => void;
+}) {
+  const [visao, setVisao] = useState<"toques" | "pedidos">("toques");
   const [filtroCanal, setFiltroCanal] = useState<CanalKey | "all">("all");
   const [periodo, setPeriodo] = useState<7 | 14 | 30 | 0>(14);
+  const corte = periodo ? Date.now() - periodo * 86400000 : 0;
 
-  const filtrados = useMemo(() => {
-    const corte = periodo ? Date.now() - periodo * 86400000 : 0;
-    return toques.filter((t) =>
-      (filtroCanal === "all" || canalDe(t.source, t.gclid, t.fbclid) === filtroCanal) &&
-      (!corte || new Date(t.ocorrido_em).getTime() >= corte));
-  }, [toques, filtroCanal, periodo]);
+  const toquesF = useMemo(() => toques.filter((t) =>
+    (filtroCanal === "all" || canalDe(t.source, t.gclid, t.fbclid) === filtroCanal) &&
+    (!corte || new Date(t.ocorrido_em).getTime() >= corte)), [toques, filtroCanal, corte]);
 
-  // agrupamento por utm_source CRUA (expõe fb/ig/an/adwords pra padronizar)
+  const snapDoPedido = useCallback((p: Pedido) => (modelo === "primeiro" ? p.primeiro_toque : p.ultimo_toque), [modelo]);
+  const pedidosF = useMemo(() => pedidos.filter((p) => {
+    const s = snapDoPedido(p);
+    const canal = s ? canalDe(s.source) : "direto";
+    return (filtroCanal === "all" || canal === filtroCanal) && (!corte || new Date(p.ocorrido_em).getTime() >= corte);
+  }), [pedidos, filtroCanal, corte, snapDoPedido]);
+
+  // utm_source crua — auditoria (muda conforme a visão)
   const porSourceCru = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const t of filtrados) m[t.source || "(vazio — só clid)"] = (m[t.source || "(vazio — só clid)"] ?? 0) + 1;
+    if (visao === "toques") for (const t of toquesF) { const k = t.source || "(vazio — só clid)"; m[k] = (m[k] ?? 0) + 1; }
+    else for (const p of pedidosF) { const s = snapDoPedido(p); const k = s ? (s.source || "(sem source)") : "(sem origem)"; m[k] = (m[k] ?? 0) + 1; }
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
-  }, [filtrados]);
+  }, [visao, toquesF, pedidosF, snapDoPedido]);
+
+  const TIPO_CHIP: Record<string, { l: string; c: string }> = {
+    ad_click: { l: "anúncio", c: "#6366f1" },
+    referral: { l: "orgânico", c: "#0d9488" },
+    direct:   { l: "direto",  c: "#94a3b8" },
+  };
 
   return (
     <div className="space-y-4">
-      {/* Filtros */}
+      {/* Filtros: visão (toques/pedidos) + canal + período */}
       <div className="flex items-center gap-2 flex-wrap">
+        <div className="inline-flex rounded-lg border border-neutral-200 bg-white p-0.5">
+          {([["toques", "Toques"], ["pedidos", "Pedidos"]] as const).map(([v, l]) => (
+            <button key={v} onClick={() => setVisao(v)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md ${visao === v ? "bg-indigo-50 text-indigo-700" : "text-neutral-500"}`}>{l}</button>
+          ))}
+        </div>
+        <span className="w-px h-5 bg-neutral-200" />
         <button onClick={() => setFiltroCanal("all")}
           className={`px-3 py-1.5 text-xs font-medium rounded-full border ${filtroCanal === "all" ? "bg-neutral-800 text-white border-neutral-800" : "bg-white text-neutral-600 border-neutral-200"}`}>Todos</button>
         {(Object.keys(CANAIS) as CanalKey[]).map((k) => (
@@ -499,65 +525,100 @@ function Origens({ toques }: { toques: Toque[] }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Feed de toques (a exposição crua que o gestor pediu) */}
         <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
-            <span className="text-sm font-semibold text-neutral-700">Feed de toques</span>
-            <span className="text-xs text-neutral-400">{filtrados.length} no período</span>
+            <span className="text-sm font-semibold text-neutral-700">{visao === "toques" ? "Feed de toques" : `Pedidos por canal (${modelo === "primeiro" ? "1º toque" : "último toque"})`}</span>
+            <span className="text-xs text-neutral-400">{visao === "toques" ? `${toquesF.length} no período` : `${pedidosF.length} no período`}</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
-                  <th className="px-4 py-2">Quando</th>
-                  <th className="px-2 py-2">Canal</th>
-                  <th className="px-2 py-2">Tipo</th>
-                  <th className="px-2 py-2">Campanha</th>
-                  <th className="px-2 py-2">Criativo / termo</th>
-                  <th className="px-2 py-2">ad_id</th>
-                  <th className="px-2 py-2">Disp.</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-50">
-                {filtrados.slice(0, 80).map((t) => {
-                  const k = canalDe(t.source, t.gclid, t.fbclid);
-                  return (
-                    <tr key={t.id} className="hover:bg-neutral-50" title={t.landing_url ?? ""}>
-                      <td className="px-4 py-2 text-neutral-500 whitespace-nowrap">{dtHora(t.ocorrido_em)}</td>
-                      <td className="px-2 py-2 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full" style={{ background: CANAIS[k].cor }} />
-                          <span className="text-neutral-700 font-medium">{CANAIS[k].label}</span>
-                          <span className="text-neutral-400">({t.source || (t.gclid ? "gclid" : t.fbclid ? "fbclid" : "—")})</span>
-                        </span>
-                      </td>
-                      <td className="px-2 py-2 whitespace-nowrap">
-                        {(() => {
-                          const tp = t.tipo ?? "ad_click";
-                          const cfg = tp === "ad_click" ? { l: "anúncio", c: "#6366f1" } : tp === "referral" ? { l: "orgânico", c: "#0d9488" } : { l: "direto", c: "#94a3b8" };
-                          return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ color: cfg.c, background: `${cfg.c}18` }}>{cfg.l}</span>;
-                        })()}
-                      </td>
-                      <td className="px-2 py-2 text-neutral-600 max-w-[160px] truncate">{t.campaign || t.campaign_id || "—"}</td>
-                      <td className="px-2 py-2 text-neutral-800 font-medium max-w-[200px] truncate">{t.term || t.content || "—"}</td>
-                      <td className="px-2 py-2 text-neutral-400 font-mono">{t.ad_id || "—"}</td>
-                      <td className="px-2 py-2 text-neutral-500">{t.device || "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {filtrados.length > 80 && <p className="px-4 py-2 text-[11px] text-neutral-400">Mostrando 80 de {filtrados.length}.</p>}
+            {visao === "toques" ? (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
+                    <th className="px-4 py-2">Quando</th>
+                    <th className="px-2 py-2">Canal</th>
+                    <th className="px-2 py-2">Tipo</th>
+                    <th className="px-2 py-2">Campanha</th>
+                    <th className="px-2 py-2">Criativo / termo</th>
+                    <th className="px-2 py-2">ad_id</th>
+                    <th className="px-2 py-2">Disp.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-50">
+                  {toquesF.slice(0, 80).map((t) => {
+                    const k = canalDe(t.source, t.gclid, t.fbclid);
+                    const tp = TIPO_CHIP[t.tipo ?? "ad_click"] ?? TIPO_CHIP.ad_click;
+                    return (
+                      <tr key={t.id} className="hover:bg-indigo-50/40 cursor-pointer" title="Clique pra ver a jornada deste visitante"
+                        onClick={() => onAbrirVid(t.vid)}>
+                        <td className="px-4 py-2 text-neutral-500 whitespace-nowrap">{dtHora(t.ocorrido_em)}</td>
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full" style={{ background: CANAIS[k].cor }} />
+                            <span className="text-neutral-700 font-medium">{CANAIS[k].label}</span>
+                            <span className="text-neutral-400">({t.source || (t.gclid ? "gclid" : t.fbclid ? "fbclid" : "—")})</span>
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ color: tp.c, background: `${tp.c}18`, border: `1px solid ${tp.c}44` }}>{tp.l}</span>
+                        </td>
+                        <td className="px-2 py-2 text-neutral-600 max-w-[160px] truncate">{t.campaign || t.campaign_id || "—"}</td>
+                        <td className="px-2 py-2 text-neutral-800 font-medium max-w-[200px] truncate">{t.term || t.content || "—"}</td>
+                        <td className="px-2 py-2 text-neutral-400 font-mono">{t.ad_id || "—"}</td>
+                        <td className="px-2 py-2 text-neutral-500">{t.device || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
+                    <th className="px-4 py-2">Quando</th>
+                    <th className="px-2 py-2">Cliente</th>
+                    <th className="px-2 py-2">Canal</th>
+                    <th className="px-2 py-2">Campanha</th>
+                    <th className="px-2 py-2">Criativo</th>
+                    <th className="px-2 py-2 text-right">Valor</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-50">
+                  {pedidosF.slice(0, 80).map((p) => {
+                    const s = snapDoPedido(p);
+                    const k = s ? canalDe(s.source) : "direto";
+                    const c = p.cliente_id ? clientePorId[p.cliente_id] : null;
+                    return (
+                      <tr key={p.pedido_id} className="hover:bg-indigo-50/40 cursor-pointer" title="Clique pra ver a jornada"
+                        onClick={() => { if (c) onJornada(c); else if (p.vid_no_pedido) onAbrirVid(p.vid_no_pedido); }}>
+                        <td className="px-4 py-2 text-neutral-500 whitespace-nowrap">{dt(p.ocorrido_em)}</td>
+                        <td className="px-2 py-2 text-neutral-800 font-medium max-w-[170px] truncate">{c?.nome || c?.email || <span className="text-neutral-300 italic">não identificado</span>}</td>
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full" style={{ background: CANAIS[k].cor }} />
+                            <span className="text-neutral-700">{s ? (s.source || CANAIS[k].label) : "direto"}</span>
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 text-neutral-600 max-w-[160px] truncate">{s?.campaign || "—"}</td>
+                        <td className="px-2 py-2 text-neutral-800 max-w-[180px] truncate">{s?.term || s?.ad_id || "—"}</td>
+                        <td className="px-2 py-2 text-right font-semibold text-neutral-800 whitespace-nowrap">{p.valor != null ? brl(Number(p.valor)) : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {visao === "toques" && toquesF.length > 80 && <p className="px-4 py-2 text-[11px] text-neutral-400">Mostrando 80 de {toquesF.length}.</p>}
+            {visao === "pedidos" && pedidosF.length > 80 && <p className="px-4 py-2 text-[11px] text-neutral-400">Mostrando 80 de {pedidosF.length}.</p>}
           </div>
         </div>
 
-        {/* utm_source crua — auditoria de padronização */}
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
           <h3 className="text-sm font-semibold text-neutral-700">utm_source crua</h3>
-          <p className="text-[11px] text-neutral-400 mb-3">Como cada fonte está chegando — útil pra flagrar UTM fora do padrão (ex.: fb/ig/an em vez de facebook).</p>
+          <p className="text-[11px] text-neutral-400 mb-3">{visao === "toques" ? "Como cada fonte está chegando — flagra UTM fora do padrão." : "Fonte de origem dos pedidos filtrados."}</p>
           <div className="space-y-1.5">
             {porSourceCru.map(([s, n]) => {
-              const k = canalDe(s === "(vazio — só clid)" ? null : s);
+              const k = canalDe(s.startsWith("(") ? null : s);
               return (
                 <div key={s} className="flex items-center gap-2 text-xs">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CANAIS[k].cor }} />
@@ -963,6 +1024,87 @@ function Legenda({ canais }: { canais: CanalKey[] }) {
           <span className="w-2.5 h-2.5 rounded-full" style={{ background: CANAIS[k].cor }} />{CANAIS[k].label}
         </span>
       ))}
+    </div>
+  );
+}
+
+// ── Drawer: visitante por vid (identificado → vira jornada do cliente) ───────
+function VidDrawer({ vid, onClose }: { vid: string; onClose: () => void }) {
+  const [cliente, setCliente] = useState<Cliente | null>(null);
+  const [pronto, setPronto] = useState(false);
+  const [tq, setTq] = useState<Toque[]>([]);
+  const [pd, setPd] = useState<Pedido[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      setPronto(false); setCliente(null);
+      const { data: ident } = await supabase.from("atr_identidades").select("cliente_id").eq("vid", vid).maybeSingle();
+      if ((ident as any)?.cliente_id) {
+        const { data: c } = await supabase.from("atr_clientes").select("cliente_id, email, cnpj, nome").eq("cliente_id", (ident as any).cliente_id).maybeSingle();
+        if (c) { setCliente(c as any); setPronto(true); return; }
+      }
+      const [t, p] = await Promise.all([
+        supabase.from("atr_toques").select("id, vid, ocorrido_em, tipo, source, medium, campaign, content, term, campaign_id, adset_id, ad_id, fbclid, gclid, landing_url, device").eq("vid", vid).order("ocorrido_em"),
+        supabase.from("atr_pedidos").select("pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque").eq("vid_no_pedido", vid).order("ocorrido_em"),
+      ]);
+      setTq((t.data as any) ?? []); setPd((p.data as any) ?? []); setPronto(true);
+    })();
+  }, [vid]);
+
+  // identificado → reusa a jornada completa do cliente (todos os vids dele)
+  if (cliente) return <JornadaDrawer cliente={cliente} onClose={onClose} />;
+
+  const eventos = [
+    ...tq.map((t) => {
+      const k = canalDe(t.source, t.gclid, t.fbclid);
+      return {
+        quando: t.ocorrido_em, cor: CANAIS[k].cor,
+        titulo: t.term || t.campaign || CANAIS[k].label,
+        detalhe: [CANAIS[k].label, t.tipo && t.tipo !== "ad_click" ? t.tipo : null, t.medium, t.campaign, t.ad_id ? `ad #${t.ad_id}` : null].filter(Boolean).join(" · "),
+        pedido: false,
+      };
+    }),
+    ...pd.map((p) => ({
+      quando: p.ocorrido_em, cor: "#22c55e",
+      titulo: `Compra — pedido ${p.pedido_id}`,
+      detalhe: [p.produto, p.valor != null ? brl(Number(p.valor)) : null].filter(Boolean).join(" · "),
+      pedido: true,
+    })),
+  ].sort((a, b) => a.quando.localeCompare(b.quando));
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/40 animate-in fade-in" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+        <div className="p-5 border-b border-neutral-200 flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-neutral-100 text-neutral-500 flex items-center justify-center shrink-0"><Route className="w-5 h-5" /></div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-base font-semibold text-neutral-800">Visitante ainda não identificado</h3>
+            <p className="text-xs text-neutral-500 font-mono truncate">{vid}</p>
+          </div>
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {!pronto && <p className="text-xs text-neutral-400">Carregando...</p>}
+          {pronto && eventos.length === 0 && <p className="text-sm text-neutral-400">Sem eventos pra este visitante.</p>}
+          <div className="relative pl-5">
+            <div className="absolute left-[7px] top-1 bottom-1 w-px bg-neutral-200" />
+            {eventos.map((ev, i) => (
+              <div key={i} className="relative pb-4">
+                <span className="absolute -left-5 top-1 w-3.5 h-3.5 rounded-full border-2 border-white shadow" style={{ background: ev.cor }} />
+                <div className="text-[11px] text-neutral-400">{dtHora(ev.quando)}</div>
+                <div className={`text-sm font-medium ${ev.pedido ? "text-emerald-700" : "text-neutral-800"}`}>{ev.titulo}</div>
+                {ev.detalhe && <div className="text-xs text-neutral-500">{ev.detalhe}</div>}
+              </div>
+            ))}
+          </div>
+          {pronto && (
+            <div className="mt-2 rounded-xl bg-neutral-50 border border-neutral-200 p-3 text-xs text-neutral-500">
+              Este visitante ganha nome assim que <b>logar ou comprar</b> — aí a jornada inteira passa pro cadastro dele.
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
