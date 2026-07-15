@@ -12,6 +12,7 @@ import {
   Settings,
   LogOut,
   ListTodo,
+  Crosshair,
 } from "lucide-react";
 
 import {
@@ -29,6 +30,7 @@ import { RevenueTab } from "./components/Dashboard/tabs/RevenueTab";
 import { StrategyTab } from "./components/Dashboard/tabs/StrategyTab";
 import { SimulationsTab } from "./components/Dashboard/tabs/SimulationsTab";
 import { TarefasTab } from "./components/Dashboard/tabs/TarefasTab";
+import { AtribuicaoTab } from "./components/Dashboard/tabs/AtribuicaoTab";
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1081,6 +1083,7 @@ export default function App() {
     { id: "tarefas", label: "Tarefas", icon: <ListTodo className="w-4 h-4" /> },
     { id: "monthly", label: "Visão Mensal", icon: <CalendarDays className="w-4 h-4" /> },
     { id: "funnel", label: "Funil de Vendas", icon: <Filter className="w-4 h-4" /> },
+    { id: "atribuicao", label: "Atribuição", icon: <Crosshair className="w-4 h-4" /> },
     { id: "account-health", label: "Saúde da Conta", icon: <Activity className="w-4 h-4" /> },
     { id: "revenue", label: "Faturamento", icon: <Receipt className="w-4 h-4" /> },
     { id: "strategy", label: "Estratégia", icon: <Lightbulb className="w-4 h-4" /> },
@@ -1331,6 +1334,8 @@ export default function App() {
               companies={dbCompanies.filter((c) => allowedCompanyIds.includes(c.id))}
             />
           )}
+
+          {activeTab === "atribuicao" && <AtribuicaoTab />}
           </div>
         </main>
       </div>
