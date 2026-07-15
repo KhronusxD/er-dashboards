@@ -432,24 +432,47 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
     return { porAdId, porAdNome, porCampId, porCampNome };
   }, [gastos]);
 
-  const gastoDe = useCallback((nome: string, adId: string | null): number | null => {
-    const k = nome.trim().toLowerCase();
+  const gastoDe = useCallback((chave: string, adId: string | null): number | null => {
+    const k = chave.trim().toLowerCase();
     if (nivel === "criativo") {
+      if (gastoIdx.porAdId[chave] != null) return gastoIdx.porAdId[chave];      // chave já é ad_id
       if (adId && gastoIdx.porAdId[adId] != null) return gastoIdx.porAdId[adId];
-      if (gastoIdx.porAdNome[k] != null) return gastoIdx.porAdNome[k];
+      if (gastoIdx.porAdNome[k] != null) return gastoIdx.porAdNome[k];          // fallback por nome
     } else {
+      if (gastoIdx.porCampId[chave] != null) return gastoIdx.porCampId[chave];
       if (gastoIdx.porCampNome[k] != null) return gastoIdx.porCampNome[k];
-      if (gastoIdx.porCampId[nome] != null) return gastoIdx.porCampId[nome];
     }
     return null;
   }, [gastoIdx, nivel]);
 
+  // Dicionário ID ↔ nome (vem do sync de gasto) — traduz IDs pra nomes frescos
+  // e unifica toques antigos (por nome) com novos (só ID) na mesma linha.
+  const dicio = useMemo(() => {
+    const nomePorAdId: Record<string, string> = {};
+    const adIdPorNome: Record<string, string> = {};
+    const nomePorCampId: Record<string, string> = {};
+    const campIdPorNome: Record<string, string> = {};
+    for (const g of gastos) {
+      if (g.ad_id && g.ad_name) { nomePorAdId[g.ad_id] = g.ad_name; adIdPorNome[g.ad_name.trim().toLowerCase()] = g.ad_id; }
+      if (g.campaign_id && g.campaign_name) { nomePorCampId[g.campaign_id] = g.campaign_name; campIdPorNome[g.campaign_name.trim().toLowerCase()] = g.campaign_id; }
+    }
+    return { nomePorAdId, adIdPorNome, nomePorCampId, campIdPorNome };
+  }, [gastos]);
+
+  const norm = (s?: string | null) => (s || "").trim().toLowerCase();
+  // Chave canônica: ID quando existe (direto ou traduzindo o nome via dicionário)
   const chaveDe = useCallback((s: Snapshot) => {
     if (!s) return SEM_ATRIB;
-    return nivel === "criativo" ? (s.term || s.ad_id || s.campaign || SEM_ATRIB) : (s.campaign || s.campaign_id || SEM_ATRIB);
-  }, [nivel]);
+    if (nivel === "criativo") return s.ad_id || dicio.adIdPorNome[norm(s.term)] || s.term || s.campaign || SEM_ATRIB;
+    return s.campaign_id || dicio.campIdPorNome[norm(s.campaign)] || s.campaign || SEM_ATRIB;
+  }, [nivel, dicio]);
   const chaveToque = useCallback((t: Toque) =>
-    nivel === "criativo" ? (t.term || t.ad_id || t.campaign || SEM_ATRIB) : (t.campaign || t.campaign_id || SEM_ATRIB), [nivel]);
+    nivel === "criativo"
+      ? (t.ad_id || dicio.adIdPorNome[norm(t.term)] || t.term || t.campaign || SEM_ATRIB)
+      : (t.campaign_id || dicio.campIdPorNome[norm(t.campaign)] || t.campaign || SEM_ATRIB), [nivel, dicio]);
+  // Nome de exibição: sempre o nome FRESCO do dicionário quando a chave é um ID
+  const nomeDe = useCallback((key: string) =>
+    nivel === "criativo" ? (dicio.nomePorAdId[key] || key) : (dicio.nomePorCampId[key] || key), [nivel, dicio]);
 
   const ranking = useMemo(() => {
     const m: Record<string, { pedidos: Pedido[]; receita: number; clientes: Set<number | null>; toques: number; canal: CanalKey; adIds: Set<string>; trouxe: number; fechou: number }> = {};
@@ -512,8 +535,8 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CANAIS[r.canal].cor }} />
-                    <span className={`text-sm font-medium truncate ${r.nome === SEM_ATRIB ? "text-neutral-400 italic" : "text-neutral-800"}`}>{r.nome}</span>
-                    {r.adId && <span className="text-[10px] font-mono text-neutral-400 shrink-0">#{r.adId}</span>}
+                    <span className={`text-sm font-medium truncate ${r.nome === SEM_ATRIB ? "text-neutral-400 italic" : "text-neutral-800"}`}>{nomeDe(r.nome)}</span>
+                    {(() => { const id = nivel === "criativo" && dicio.nomePorAdId[r.nome] ? r.nome : r.adId; return id ? <span className="text-[10px] font-mono text-neutral-400 shrink-0">#{id}</span> : null; })()}
                   </div>
                   <div className="mt-1 h-1.5 rounded-full bg-neutral-100 overflow-hidden">
                     <div className="h-full rounded-full" style={{ width: `${(r.receita / maxReceita) * 100}%`, background: CANAIS[r.canal].cor }} />

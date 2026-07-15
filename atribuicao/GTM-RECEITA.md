@@ -151,14 +151,20 @@ Código FINAL da tag (colar como está):
 Usar nos **Parâmetros de URL** do anúncio (nível ad, campo "URL parameters"):
 
 ```
-utm_source=facebook&utm_medium=paid&utm_campaign={{campaign.name}}&utm_content={{adset.name}}&utm_term={{ad.name}}&camp_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}
+utm_source=facebook&utm_medium=paid&utm_campaign={{campaign.name}}&camp_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}
 ```
 
-Por quê:
-- **Nomes** (`utm_term` etc.) continuam legíveis no relatório.
-- **IDs** (`ad_id` etc.) são imutáveis: clonar/renomear anúncio nunca quebra o
-  rastreio — e o cruzamento futuro de GASTO por criativo (CAC/ROAS via API do
-  Meta) casa por ID, exato.
+Por quê (decisão 15/07 — IDs-first):
+- **Só IDs pra rastreio.** Macros de NOME congelam na criação (renomear/clonar
+  deixa valor velho e ENGANOSO). ID é imutável — nunca quebra.
+- **Nomes legíveis vêm do dicionário**: o sync de gasto traz `ad_id → nome
+  atual` diariamente; o dashboard traduz sozinho, sempre fresco.
+- `utm_campaign={{campaign.name}}` é a única exceção — mantido só pra
+  legibilidade do GA4 (campanha raramente é renomeada; se for, é cosmético,
+  os IDs carregam a verdade).
+- **Anúncios ativos que performam: NÃO editar** (volta pra revisão / mexe no
+  aprendizado). Aplicar em anúncios novos; pros antigos o casamento por nome
+  (`{{ad.name}}` no template anterior) segue funcionando.
 - **Não usamos `utm_id`** de propósito: o GA4 reserva esse parâmetro pra ID de
   campanha — usar pra ad quebraria o GA de vocês. `camp_id`/`adset_id`/`ad_id`
   são ignorados pelo GA.
