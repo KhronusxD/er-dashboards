@@ -46,7 +46,10 @@ CREATE TABLE IF NOT EXISTS napan.atr_toques (
   medium       text,                 -- utm_medium
   campaign     text,                 -- utm_campaign
   content      text,                 -- utm_content (conjunto)
-  term         text,                 -- utm_term → CRIATIVO
+  term         text,                 -- utm_term → CRIATIVO (nome, p/ humanos)
+  campaign_id  text,                 -- camp_id  → {{campaign.id}} (Meta)
+  adset_id     text,                 -- adset_id → {{adset.id}}  (Meta)
+  ad_id        text,                 -- ad_id    → {{ad.id}}     (Meta) — chave EXATA do criativo
   fbclid       text,
   gclid        text,
   landing_url  text,
@@ -123,10 +126,12 @@ BEGIN
     VALUES (v_vid, payload->>'landing', payload->>'referrer', payload->>'ua')
     ON CONFLICT (vid) DO NOTHING;
     INSERT INTO atr_toques(vid, tipo, source, medium, campaign, content, term,
+                           campaign_id, adset_id, ad_id,
                            fbclid, gclid, landing_url, referrer, device)
     VALUES (v_vid, coalesce(payload->>'tipo','ad_click'),
             payload->>'source', payload->>'medium', payload->>'campaign',
             payload->>'content', payload->>'term',
+            payload->>'campaign_id', payload->>'adset_id', payload->>'ad_id',
             payload->>'fbclid', payload->>'gclid',
             payload->>'landing', payload->>'referrer', payload->>'device');
     RETURN jsonb_build_object('ok', true, 'evento', 'touch');
@@ -181,7 +186,8 @@ BEGIN
       SELECT vid FROM atr_identidades WHERE cliente_id = v_cliente
       UNION SELECT v_vid WHERE v_vid IS NOT NULL
     ), tq AS (
-      SELECT t.source, t.medium, t.campaign, t.content, t.term, t.ocorrido_em
+      SELECT t.source, t.medium, t.campaign, t.content, t.term,
+             t.campaign_id, t.adset_id, t.ad_id, t.ocorrido_em
       FROM atr_toques t JOIN vids USING (vid)
     )
     SELECT

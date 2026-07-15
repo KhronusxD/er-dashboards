@@ -57,6 +57,9 @@ URL tem `utm_*`/`fbclid`/`gclid`, ou seja, só no pageview de chegada de campanh
     campaign: p.get('utm_campaign'),
     content: p.get('utm_content'),
     term: p.get('utm_term'),
+    campaign_id: p.get('camp_id'),
+    adset_id: p.get('adset_id'),
+    ad_id: p.get('ad_id'),
     fbclid: p.get('fbclid'),
     gclid: p.get('gclid'),
     landing: location.href.split('#')[0].substring(0, 500),
@@ -79,7 +82,8 @@ URL tem `utm_*`/`fbclid`/`gclid`, ou seja, só no pageview de chegada de campanh
 ## 4. Tag 2 — "ATRIB · purchase" (Custom HTML) — ✅ FINAL (dataLayer real, 15/07/2026)
 
 **Acionador:** *Evento personalizado* → nome do evento: **`purchase`**
-(confirmado no dataLayer real do e-commerce).
+(confirmado no dataLayer real do e-commerce). **JÁ EXISTE no contêiner**
+(acionador nº 10, "purchase") — reusar, não criar outro.
 
 **Variáveis de dataLayer** (tipo *Variável de camada de dados*, versão 2) —
 nomes CONFIRMADOS no dump real:
@@ -133,6 +137,25 @@ Código FINAL da tag (colar como está):
 
 > O endpoint é **idempotente por pedido_id** — se a pessoa recarregar a página
 > de confirmação, não duplica.
+
+## 4b. Template de URL nos anúncios (Meta) — nome p/ humanos + ID p/ máquina
+
+Usar nos **Parâmetros de URL** do anúncio (nível ad, campo "URL parameters"):
+
+```
+utm_source=facebook&utm_medium=paid&utm_campaign={{campaign.name}}&utm_content={{adset.name}}&utm_term={{ad.name}}&camp_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}
+```
+
+Por quê:
+- **Nomes** (`utm_term` etc.) continuam legíveis no relatório.
+- **IDs** (`ad_id` etc.) são imutáveis: clonar/renomear anúncio nunca quebra o
+  rastreio — e o cruzamento futuro de GASTO por criativo (CAC/ROAS via API do
+  Meta) casa por ID, exato.
+- **Não usamos `utm_id`** de propósito: o GA4 reserva esse parâmetro pra ID de
+  campanha — usar pra ad quebraria o GA de vocês. `camp_id`/`adset_id`/`ad_id`
+  são ignorados pelo GA.
+- Google Ads (futuro): equivalente via ValueTrack (`{creative}`, `{campaignid}`,
+  `{adgroupid}`) no sufixo de URL final — entra quando formos padronizar o Google.
 
 ## 5. O que precisamos do site (só olhar, não codar)
 
