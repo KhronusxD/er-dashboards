@@ -373,7 +373,11 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
       const canal = canalDe(s.source);
       if (canal !== "meta" && canal !== "google") continue;
       const g = grupos[canal];
-      const key = (s.campaign_id && g[s.campaign_id]) ? s.campaign_id : idx[canal][(s.campaign || "").trim().toLowerCase()];
+      // casa por: campaign_id | campo campaign carregando o próprio ID (sufixo
+      // Google manda utm_campaign={campaignid}) | nome da campanha
+      const key = (s.campaign_id && g[s.campaign_id]) ? s.campaign_id
+        : (s.campaign && g[s.campaign]) ? s.campaign
+        : idx[canal][(s.campaign || "").trim().toLowerCase()];
       if (!key) continue;
       g[key].aCompras += 1; g[key].aReceita += Number(p.valor) || 0;
     }
@@ -390,7 +394,8 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
         <Kpi icone={<Percent className="w-4 h-4" />} rotulo="Pedidos c/ origem" valor={`${pctOrigem}%`} destaque={pctOrigem < 30 ? "baixo — cresce com o tempo" : undefined} />
         <Kpi icone={<Receipt className="w-4 h-4" />} rotulo="Receita" valor={brl(receita)} />
         <Kpi icone={<Users className="w-4 h-4" />} rotulo="Clientes" valor={String(clientesUnicos)} />
-        <Kpi icone={<Clock className="w-4 h-4" />} rotulo="Tempo até compra" valor={tempoMedio == null ? "—" : `${tempoMedio.toFixed(1)}d`} />
+        <Kpi icone={<Clock className="w-4 h-4" />} rotulo="Tempo até compra"
+          valor={tempoMedio == null ? "—" : tempoMedio >= 1 ? `${tempoMedio.toFixed(1)}d` : tempoMedio >= 1 / 24 ? `${(tempoMedio * 24).toFixed(1)}h` : `${Math.round(tempoMedio * 1440)}min`} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
@@ -764,7 +769,9 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
       : (t.campaign_id || dicio.campIdPorNome[norm(t.campaign)] || t.campaign || SEM_ATRIB), [nivel, dicio]);
   // Nome de exibição: sempre o nome FRESCO do dicionário quando a chave é um ID
   const nomeDe = useCallback((key: string) =>
-    nivel === "criativo" ? (dicio.nomePorAdId[key] || key) : (dicio.nomePorCampId[key] || key), [nivel, dicio]);
+    nivel === "criativo"
+      ? (dicio.nomePorAdId[key] || dicio.nomePorCampId[key] || key)   // fallback: chave pode ser um campaign_id (Google sem keyword)
+      : (dicio.nomePorCampId[key] || key), [nivel, dicio]);
 
   const ranking = useMemo(() => {
     const m: Record<string, { pedidos: Pedido[]; receita: number; clientes: Set<number | null>; toques: number; canal: CanalKey; adIds: Set<string>; trouxe: number; fechou: number }> = {};
@@ -1404,7 +1411,16 @@ function JornadaDrawer({ cliente, onClose }: { cliente: Cliente; onClose: () => 
         return {
           quando: t.ocorrido_em, tipo: "toque" as const,
           titulo: t.term || t.campaign || CANAIS[k].label,
-          detalhe: [CANAIS[k].label, t.medium, t.campaign].filter(Boolean).join(" · "),
+          // UTMs completas do toque, visíveis no perfil
+          detalhe: [
+            CANAIS[k].label,
+            t.source && t.source !== CANAIS[k].label.toLowerCase() ? `src: ${t.source}` : null,
+            t.medium ? `medium: ${t.medium}` : null,
+            t.campaign ? `camp: ${t.campaign}` : null,
+            t.content ? `conj: ${t.content}` : null,
+            t.ad_id ? `ad #${t.ad_id}` : null,
+            t.tipo && t.tipo !== "ad_click" ? t.tipo : null,
+          ].filter(Boolean).join(" · "),
           cor: CANAIS[k].cor,
         };
       }),
@@ -1465,9 +1481,20 @@ function JornadaDrawer({ cliente, onClose }: { cliente: Cliente; onClose: () => 
                   {pedidos.map((p) => (
                     <div key={p.pedido_id} className="px-3 py-2 flex items-center gap-2 text-xs">
                       <ShoppingCart className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                      <div className="flex-1 min-w-0 truncate">
-                        <span className="font-medium text-neutral-800">#{p.pedido_id}</span>
-                        <span className="text-neutral-400 ml-1.5">{p.produto || ""}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate">
+                          <span className="font-medium text-neutral-800">#{p.pedido_id}</span>
+                          <span className="text-neutral-400 ml-1.5">{p.produto || ""}</span>
+                        </div>
+                        {(p.primeiro_toque || p.ultimo_toque) ? (
+                          <div className="text-[10px] text-neutral-400 truncate">
+                            via {p.primeiro_toque?.term || p.primeiro_toque?.campaign || "?"}
+                            {p.ultimo_toque && p.primeiro_toque && p.ultimo_toque.ocorrido_em !== p.primeiro_toque.ocorrido_em
+                              ? ` → fechou: ${p.ultimo_toque.term || p.ultimo_toque.campaign || "?"}` : ""}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-neutral-300 italic">sem origem de campanha</div>
+                        )}
                       </div>
                       <span className="text-neutral-400 whitespace-nowrap">{dt(p.ocorrido_em)}</span>
                       <span className="font-semibold text-neutral-800 whitespace-nowrap">{p.valor != null ? brl(Number(p.valor)) : "—"}</span>
