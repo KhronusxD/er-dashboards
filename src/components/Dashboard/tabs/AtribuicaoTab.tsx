@@ -81,6 +81,7 @@ export function AtribuicaoTab() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [loading, setLoading] = useState(true);
   const [modelo, setModelo] = useState<Modelo>("primeiro");
+  const [periodo, setPeriodo] = useState<7 | 14 | 30 | 0>(14);
   const [jornadaDe, setJornadaDe] = useState<Cliente | null>(null);
   const [vidAberto, setVidAberto] = useState<string | null>(null);
 
@@ -123,6 +124,13 @@ export function AtribuicaoTab() {
   const clientePorId = useMemo(() => Object.fromEntries(clientes.map((c) => [c.cliente_id, c])), [clientes]);
   const vazio = !loading && toques.length === 0 && pedidos.length === 0;
 
+  // Filtro GLOBAL de período — vale pra todas as sub-abas (toques, pedidos e gasto)
+  const corte = periodo ? Date.now() - periodo * 86400000 : 0;
+  const toquesF = useMemo(() => (corte ? toques.filter((t) => new Date(t.ocorrido_em).getTime() >= corte) : toques), [toques, corte]);
+  const pedidosF = useMemo(() => (corte ? pedidos.filter((p) => new Date(p.ocorrido_em).getTime() >= corte) : pedidos), [pedidos, corte]);
+  const gastosF = useMemo(() => (corte ? gastos.filter((g) => new Date(g.dia + "T23:59:59").getTime() >= corte) : gastos), [gastos, corte]);
+  const totalToquesF = periodo ? toquesF.length : totalToques;
+
   const SUBS: { k: SubTab; l: string; Ic: any }[] = [
     { k: "visao", l: "Visão Geral", Ic: LayoutDashboard },
     { k: "origens", l: "Origens (UTMs)", Ic: Radio },
@@ -144,6 +152,15 @@ export function AtribuicaoTab() {
             <p className="text-xs text-neutral-500">Origem de cada toque, criativo e cliente — do clique à compra.</p>
           </div>
         </div>
+        <div className="flex items-center gap-2 flex-wrap">
+        <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-1" title="Período — vale pra TODAS as sub-abas">
+          {([[7, "7d"], [14, "14d"], [30, "30d"], [0, "Tudo"]] as const).map(([v, l]) => (
+            <button key={v} onClick={() => setPeriodo(v as any)}
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors ${periodo === v ? "bg-white text-indigo-700 shadow-sm border border-neutral-200" : "text-neutral-500 hover:text-neutral-800"}`}>
+              {l}
+            </button>
+          ))}
+        </div>
         <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-1">
           {([["primeiro", "1º toque"], ["ultimo", "Último toque"]] as const).map(([v, label]) => (
             <button key={v} onClick={() => setModelo(v)}
@@ -152,6 +169,7 @@ export function AtribuicaoTab() {
               {label}
             </button>
           ))}
+        </div>
         </div>
       </div>
 
@@ -173,11 +191,11 @@ export function AtribuicaoTab() {
         </div>
       )}
 
-      {!vazio && sub === "visao" && <VisaoGeral toques={toques} pedidos={pedidos} gastos={gastos} modelo={modelo} totalToques={totalToques} />}
-      {!vazio && sub === "origens" && <Origens toques={toques} pedidos={pedidos} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
-      {!vazio && sub === "criativos" && <Criativos pedidos={pedidos} toques={toques} gastos={gastos} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
-      {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidos} clientePorId={clientePorId} onJornada={setJornadaDe} />}
-      {!vazio && sub === "clientes" && <ClientesView pedidos={pedidos} clientes={clientes} onJornada={setJornadaDe} />}
+      {!vazio && sub === "visao" && <VisaoGeral toques={toquesF} pedidos={pedidosF} gastos={gastosF} modelo={modelo} totalToques={totalToquesF} periodo={periodo} />}
+      {!vazio && sub === "origens" && <Origens toques={toquesF} pedidos={pedidosF} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
+      {!vazio && sub === "criativos" && <Criativos pedidos={pedidosF} toques={toquesF} gastos={gastosF} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
+      {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidosF} clientePorId={clientePorId} onJornada={setJornadaDe} />}
+      {!vazio && sub === "clientes" && <ClientesView pedidos={pedidosF} clientes={clientes} onJornada={setJornadaDe} />}
 
       {loading && <p className="text-xs text-neutral-400">Carregando...</p>}
       {jornadaDe && <JornadaDrawer cliente={jornadaDe} onClose={() => setJornadaDe(null)} />}
@@ -187,7 +205,8 @@ export function AtribuicaoTab() {
 }
 
 // ═════════════════════════ SUB-ABA: VISÃO GERAL ═════════════════════════════
-function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: Toque[]; pedidos: Pedido[]; gastos: Gasto[]; modelo: Modelo; totalToques: number }) {
+function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, periodo }: { toques: Toque[]; pedidos: Pedido[]; gastos: Gasto[]; modelo: Modelo; totalToques: number; periodo: number }) {
+  const janela = periodo === 0 ? 30 : periodo; // janela dos gráficos diários
   const receita = useMemo(() => pedidos.reduce((s, p) => s + (Number(p.valor) || 0), 0), [pedidos]);
   const clientesUnicos = useMemo(() => new Set(pedidos.map((p) => p.cliente_id).filter(Boolean)).size, [pedidos]);
   const comOrigem = useMemo(() => pedidos.filter((p) => p.primeiro_toque).length, [pedidos]);
@@ -201,7 +220,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: 
   const serieDiaria = useMemo(() => {
     const hoje = new Date();
     const diasArr: { dia: string; label: string }[] = [];
-    for (let i = 13; i >= 0; i--) {
+    for (let i = janela - 1; i >= 0; i--) {
       const d = new Date(hoje); d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
       diasArr.push({ dia: key, label: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}` });
@@ -215,7 +234,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: 
       (base[idx[k]] as any)[canalDe(t.source, t.gclid, t.fbclid)] += 1;
     }
     return base;
-  }, [toques]);
+  }, [toques, janela]);
 
   // Donut por canal (toques) + receita por canal (pedidos, modelo escolhido)
   const porCanalToques = useMemo(() => {
@@ -245,7 +264,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: 
   const pedidosSerie = useMemo(() => {
     const hoje = new Date();
     const base: any[] = []; const idx: Record<string, number> = {};
-    for (let i = 13; i >= 0; i--) {
+    for (let i = janela - 1; i >= 0; i--) {
       const d = new Date(hoje); d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10); idx[key] = base.length;
       base.push({ label: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`, google: 0, meta: 0, teste: 0, outros: 0, direto: 0 });
@@ -256,7 +275,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: 
       base[idx[k]][p.primeiro_toque ? canalDe(p.primeiro_toque.source) : "direto"] += 1;
     }
     return base;
-  }, [pedidos]);
+  }, [pedidos, janela]);
   const canaisPedidos = (Object.keys(CANAIS) as CanalKey[]).filter((k) => pedidosSerie.some((d) => d[k] > 0));
 
   // Pistas: de onde vêm os "diretos" (toques orgânicos/referral — tag v3)
@@ -312,7 +331,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: 
         {/* Toques por dia (empilhado por canal) */}
         <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
           <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-neutral-700">Toques por dia · últimos 14 dias</h3>
+            <h3 className="text-sm font-semibold text-neutral-700">Toques por dia · últimos {janela} dias</h3>
             <Legenda canais={canaisPresentes} />
           </div>
           <div style={{ height: 220 }}>
@@ -438,19 +457,17 @@ function Origens({ toques, pedidos, modelo, clientePorId, onAbrirVid, onJornada 
 }) {
   const [visao, setVisao] = useState<"toques" | "pedidos">("toques");
   const [filtroCanal, setFiltroCanal] = useState<CanalKey | "all">("all");
-  const [periodo, setPeriodo] = useState<7 | 14 | 30 | 0>(14);
-  const corte = periodo ? Date.now() - periodo * 86400000 : 0;
+  // período vem do filtro GLOBAL da aba (props já chegam filtradas)
 
   const toquesF = useMemo(() => toques.filter((t) =>
-    (filtroCanal === "all" || canalDe(t.source, t.gclid, t.fbclid) === filtroCanal) &&
-    (!corte || new Date(t.ocorrido_em).getTime() >= corte)), [toques, filtroCanal, corte]);
+    filtroCanal === "all" || canalDe(t.source, t.gclid, t.fbclid) === filtroCanal), [toques, filtroCanal]);
 
   const snapDoPedido = useCallback((p: Pedido) => (modelo === "primeiro" ? p.primeiro_toque : p.ultimo_toque), [modelo]);
   const pedidosF = useMemo(() => pedidos.filter((p) => {
     const s = snapDoPedido(p);
     const canal = s ? canalDe(s.source) : "direto";
-    return (filtroCanal === "all" || canal === filtroCanal) && (!corte || new Date(p.ocorrido_em).getTime() >= corte);
-  }), [pedidos, filtroCanal, corte, snapDoPedido]);
+    return filtroCanal === "all" || canal === filtroCanal;
+  }), [pedidos, filtroCanal, snapDoPedido]);
 
   // utm_source crua — auditoria (muda conforme a visão)
   const porSourceCru = useMemo(() => {
@@ -486,13 +503,6 @@ function Origens({ toques, pedidos, modelo, clientePorId, onAbrirVid, onJornada 
             <span className="w-2 h-2 rounded-full" style={{ background: filtroCanal === k ? "#fff" : CANAIS[k].cor }} />{CANAIS[k].label}
           </button>
         ))}
-        <div className="flex-1" />
-        <div className="inline-flex rounded-lg border border-neutral-200 bg-white p-0.5">
-          {([[7, "7d"], [14, "14d"], [30, "30d"], [0, "Tudo"]] as const).map(([v, l]) => (
-            <button key={v} onClick={() => setPeriodo(v as any)}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md ${periodo === v ? "bg-indigo-50 text-indigo-700" : "text-neutral-500"}`}>{l}</button>
-          ))}
-        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
