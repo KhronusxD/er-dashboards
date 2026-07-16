@@ -37,6 +37,32 @@ const CATEGORIES = [
   { value: "reuniao", label: "Reunião" },
   { value: "outro", label: "Outro" },
 ];
+// Responsáveis fixos da equipe (avatar por cor)
+const RESPONSAVEIS = [
+  { id: "Ed", label: "Ed", cor: "#6366f1" },
+  { id: "Marina", label: "Marina", cor: "#ec4899" },
+];
+const parseResp = (a?: string | null): string[] => (a || "").split(",").map((s) => s.trim()).filter(Boolean);
+const respInfo = (id: string) => RESPONSAVEIS.find((r) => r.id.toLowerCase() === id.toLowerCase()) ?? { id, label: id, cor: "#94a3b8" };
+function Avatares({ assignee, tam = 18 }: { assignee?: string | null; tam?: number }) {
+  const ids = parseResp(assignee);
+  if (ids.length === 0) return null;
+  return (
+    <span className="inline-flex items-center" style={{ marginLeft: "auto" }}>
+      {ids.map((id, i) => {
+        const r = respInfo(id);
+        return (
+          <span key={id} title={r.label}
+            className="rounded-full flex items-center justify-center font-semibold text-white border border-white shrink-0"
+            style={{ width: tam, height: tam, background: r.cor, fontSize: tam * 0.5, marginLeft: i ? -tam * 0.28 : 0, zIndex: ids.length - i }}>
+            {r.label.charAt(0).toUpperCase()}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 const STATUSES = [
   { value: "a_fazer", label: "A fazer", color: "#94a3b8" },
   { value: "fazendo", label: "Fazendo", color: "#6366f1" },
@@ -97,7 +123,7 @@ type Draft = {
 const emptyDraft = (date?: string): Draft => ({
   id: null, company_id: "", title: "", description: "",
   priority: "media", category: "", status: "a_fazer",
-  due_date: date ?? ymd(new Date()), assignee: "", accent_color: "", icon: "",
+  due_date: date ?? ymd(new Date()), assignee: "Ed, Marina", accent_color: "", icon: "",
 });
 
 // ── Componente principal ────────────────────────────────────────────────────
@@ -262,9 +288,10 @@ function TaskChip({ t, companyById, onOpenEdit }: { key?: React.Key; t: Task; co
       <span className="flex items-center gap-1 text-[8.5px] font-bold uppercase tracking-wide opacity-90">
         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: pr.color }} /> {t.category ? categoryLabel(t.category) : pr.label}
       </span>
-      <span className="flex items-start gap-1 text-[11.5px] font-semibold leading-snug">
+      <span className="flex items-center gap-1 text-[11.5px] font-semibold leading-snug">
         {t.icon && <span className="shrink-0" style={{ fontSize: 12 }}>{t.icon}</span>}
         <span className="min-w-0 break-words">{t.title}</span>
+        <Avatares assignee={t.assignee} tam={15} />
       </span>
     </div>
   );
@@ -410,7 +437,7 @@ function KanbanView({ tasks, companyById, onOpen, onNew, onMoveStatus }: {
                     <div className="flex items-center gap-2 flex-wrap text-[11px] mt-1.5">
                       <span className="inline-flex items-center gap-1" style={{ color: pr.color }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: pr.color }} />{pr.label}</span>
                       {t.category && <span className="text-neutral-400">{categoryLabel(t.category)}</span>}
-                      {t.assignee && <span className="ml-auto w-5 h-5 rounded-full bg-neutral-200 text-neutral-600 text-[10px] font-semibold flex items-center justify-center">{t.assignee.charAt(0).toUpperCase()}</span>}
+                      <Avatares assignee={t.assignee} tam={20} />
                     </div>
                   </div>
                 );
@@ -494,8 +521,24 @@ function TaskDrawer({ draft, setDraft, companies, onClose, onSave, onRemove }: {
             </div>
             <div>
               <label className="block text-xs font-medium text-neutral-500 mb-1">Responsável</label>
-              <input type="text" value={draft.assignee} onChange={(e) => setDraft({ ...draft, assignee: e.target.value })} placeholder="Nome"
-                className="w-full px-3 py-2 rounded-lg border border-neutral-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              <div className="flex gap-1.5">
+                {RESPONSAVEIS.map((r) => {
+                  const sel = parseResp(draft.assignee).some((x) => x.toLowerCase() === r.id.toLowerCase());
+                  return (
+                    <button key={r.id} type="button"
+                      onClick={() => {
+                        const atual = parseResp(draft.assignee);
+                        const novos = sel ? atual.filter((x) => x.toLowerCase() !== r.id.toLowerCase()) : [...atual, r.id];
+                        setDraft({ ...draft, assignee: novos.join(", ") });
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-sm font-medium transition-colors ${sel ? "text-white" : "text-neutral-600 border-neutral-200 hover:bg-neutral-50"}`}
+                      style={sel ? { background: r.cor, borderColor: r.cor } : undefined}>
+                      <span className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{ background: sel ? "rgba(255,255,255,.3)" : r.cor }}>{r.label.charAt(0)}</span>
+                      {r.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
