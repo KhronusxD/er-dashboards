@@ -27,7 +27,17 @@ type Pedido = {
   ultimo_toque: Snapshot;
 };
 type Cliente = { cliente_id: number; email: string; cnpj: string | null; nome: string | null; cpf?: string | null; telefone?: string | null; plataforma_id?: string | null };
-type Gasto = { dia: string; canal: string; campaign_id: string | null; campaign_name: string | null; ad_id: string | null; ad_name: string | null; gasto: number; cliques: number | null; plataforma_compras: number | null; plataforma_receita: number | null };
+type Gasto = { dia: string; canal: string; campaign_id: string | null; campaign_name: string | null; adset_id: string | null; adset_name: string | null; ad_id: string | null; ad_name: string | null; gasto: number; cliques: number | null; plataforma_compras: number | null; plataforma_receita: number | null };
+
+// ── Dicionário global ID → nome (alimentado pelos syncs de gasto) ────────────
+// Regra de leitura da aba: NOME sempre em primeiro plano, ID em segundo (hover).
+type Dic = { camp: Record<string, string>; conj: Record<string, string>; ad: Record<string, string> };
+const traduzCamp = (dic: Dic, campaign?: string | null, campaign_id?: string | null): string | null =>
+  (campaign_id && dic.camp[campaign_id]) || (campaign && dic.camp[campaign]) || campaign || campaign_id || null;
+const traduzAd = (dic: Dic, term?: string | null, ad_id?: string | null): string | null =>
+  (ad_id && dic.ad[ad_id]) || (term && dic.ad[term]) || term || (ad_id ? `#${ad_id}` : null);
+const traduzConj = (dic: Dic, content?: string | null, adset_id?: string | null): string | null =>
+  (adset_id && dic.conj[adset_id]) || (content && dic.conj[content]) || content || adset_id || null;
 
 // toque de ANÚNCIO (pago) vs orgânico/direto (pistas — não levam crédito pago)
 const isAd = (t: Toque) => (t.tipo ?? "ad_click") === "ad_click";
@@ -163,7 +173,7 @@ export function AtribuicaoTab() {
         .select("pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque")
         .order("ocorrido_em", { ascending: false }).limit(2000),
       supabase.from("atr_clientes").select("cliente_id, email, cnpj, cpf, nome, telefone, plataforma_id").limit(3000),
-      supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, ad_id, ad_name, gasto, cliques, plataforma_compras, plataforma_receita").limit(8000),
+      supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, gasto, cliques, plataforma_compras, plataforma_receita").limit(8000),
     ]);
     setToques((tq as any) ?? []);
     setTotalToques(count ?? (tq as any[]).length);
@@ -176,6 +186,17 @@ export function AtribuicaoTab() {
 
   const clientePorId = useMemo(() => Object.fromEntries(clientes.map((c) => [c.cliente_id, c])), [clientes]);
   const vazio = !loading && toques.length === 0 && pedidos.length === 0;
+
+  // Dicionário global (SEM filtro de período — nome não pode sumir com o recorte)
+  const dic = useMemo<Dic>(() => {
+    const d: Dic = { camp: {}, conj: {}, ad: {} };
+    for (const g of gastos) {
+      if (g.campaign_id && g.campaign_name) d.camp[g.campaign_id] = g.campaign_name;
+      if (g.adset_id && g.adset_name) d.conj[g.adset_id] = g.adset_name;
+      if (g.ad_id && g.ad_name) d.ad[g.ad_id] = g.ad_name;
+    }
+    return d;
+  }, [gastos]);
 
   // Filtro GLOBAL de período (intervalo com início E fim) — vale pra todas as sub-abas
   const intervalo = useMemo(() => intervaloPeriodo(periodoOpcao, customIni, customFim), [periodoOpcao, customIni, customFim]);
@@ -254,15 +275,15 @@ export function AtribuicaoTab() {
       )}
 
       {!vazio && sub === "visao" && <VisaoGeral toques={toquesF} pedidos={pedidosF} gastos={gastosF} modelo={modelo} totalToques={totalToquesF} intervalo={intervalo} />}
-      {!vazio && sub === "origens" && <Origens toques={toquesF} pedidos={pedidosF} gastos={gastos} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
+      {!vazio && sub === "origens" && <Origens toques={toquesF} pedidos={pedidosF} dic={dic} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
       {!vazio && sub === "criativos" && <Criativos pedidos={pedidosF} toques={toquesF} gastos={gastosF} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
-      {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidosF} clientePorId={clientePorId} onJornada={setJornadaDe} />}
-      {!vazio && sub === "clientes" && <ClientesView pedidos={pedidosF} clientes={clientes} onJornada={setJornadaDe} />}
-      {!vazio && sub === "revendas" && <MonitorRevendas intervalo={intervalo} />}
+      {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidosF} clientePorId={clientePorId} dic={dic} onJornada={setJornadaDe} />}
+      {!vazio && sub === "clientes" && <ClientesView pedidos={pedidosF} clientes={clientes} dic={dic} onJornada={setJornadaDe} />}
+      {!vazio && sub === "revendas" && <MonitorRevendas intervalo={intervalo} dic={dic} />}
 
       {loading && <p className="text-xs text-neutral-400">Carregando...</p>}
-      {jornadaDe && <JornadaDrawer cliente={jornadaDe} onClose={() => setJornadaDe(null)} />}
-      {vidAberto && <VidDrawer vid={vidAberto} onClose={() => setVidAberto(null)} />}
+      {jornadaDe && <JornadaDrawer cliente={jornadaDe} dic={dic} onClose={() => setJornadaDe(null)} />}
+      {vidAberto && <VidDrawer vid={vidAberto} dic={dic} onClose={() => setVidAberto(null)} />}
     </div>
   );
 }
@@ -534,26 +555,19 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
 }
 
 // ═════════════════════════ SUB-ABA: ORIGENS (UTMs) ══════════════════════════
-function Origens({ toques, pedidos, gastos, modelo, clientePorId, onAbrirVid, onJornada }: {
-  toques: Toque[]; pedidos: Pedido[]; gastos: Gasto[]; modelo: Modelo;
+function Origens({ toques, pedidos, dic, modelo, clientePorId, onAbrirVid, onJornada }: {
+  toques: Toque[]; pedidos: Pedido[]; dic: Dic; modelo: Modelo;
   clientePorId: Record<string, Cliente>;
   onAbrirVid: (vid: string) => void; onJornada: (c: Cliente) => void;
 }) {
   const [visao, setVisao] = useState<"toques" | "pedidos">("toques");
   const [filtroCanal, setFiltroCanal] = useState<CanalKey | "all">("all");
 
-  // Dicionário ID→nome (do sync de gasto, SEM filtro de período) — traduz o
-  // utm_campaign={campaignid} do Google pro nome oficial; o valor cru fica no hover
-  const nomeCampanha = useMemo(() => {
-    const d: Record<string, string> = {};
-    for (const g of gastos) if (g.campaign_id && g.campaign_name) d[g.campaign_id] = g.campaign_name;
-    return d;
-  }, [gastos]);
   const campanhaDe = useCallback((campaign?: string | null, campaign_id?: string | null) => {
     const cru = campaign || campaign_id || "";
-    const nome = (campaign_id && nomeCampanha[campaign_id]) || (campaign && nomeCampanha[campaign]) || null;
-    return { texto: nome || cru || "—", cru, traduzido: !!nome && nome !== cru };
-  }, [nomeCampanha]);
+    const nome = traduzCamp(dic, campaign, campaign_id);
+    return { texto: nome || "—", cru, traduzido: !!nome && nome !== cru };
+  }, [dic]);
   // período vem do filtro GLOBAL da aba (props já chegam filtradas)
 
   const toquesF = useMemo(() => toques.filter((t) =>
@@ -645,7 +659,9 @@ function Origens({ toques, pedidos, gastos, modelo, clientePorId, onAbrirVid, on
                             <span title={c.cru}>{c.texto}{c.traduzido && <span className="text-[9px] text-indigo-400 ml-1" title={`traduzido do id ${c.cru}`}>id→</span>}</span>
                           ); })()}
                         </td>
-                        <td className="px-2 py-2 text-neutral-800 font-medium max-w-[200px] truncate">{t.term || t.content || "—"}</td>
+                        <td className="px-2 py-2 text-neutral-800 font-medium max-w-[200px] truncate" title={t.term || t.ad_id || ""}>
+                          {traduzAd(dic, t.term, t.ad_id) || traduzConj(dic, t.content, t.adset_id) || "—"}
+                        </td>
                         <td className="px-2 py-2 text-neutral-400 font-mono">{t.ad_id || "—"}</td>
                         <td className="px-2 py-2 text-neutral-500">{t.device || "—"}</td>
                       </tr>
@@ -684,7 +700,9 @@ function Origens({ toques, pedidos, gastos, modelo, clientePorId, onAbrirVid, on
                         <td className="px-2 py-2 text-neutral-600 max-w-[160px] truncate">
                           {(() => { const c = campanhaDe(s?.campaign, s?.campaign_id); return <span title={c.cru}>{c.texto}</span>; })()}
                         </td>
-                        <td className="px-2 py-2 text-neutral-800 max-w-[180px] truncate">{s?.term || s?.ad_id || "—"}</td>
+                        <td className="px-2 py-2 text-neutral-800 max-w-[180px] truncate" title={s?.term || s?.ad_id || ""}>
+                          {s ? (traduzAd(dic, s.term, s.ad_id) || "—") : "—"}
+                        </td>
                         <td className="px-2 py-2 text-right font-semibold text-neutral-800 whitespace-nowrap">{p.valor != null ? brl(Number(p.valor)) : "—"}</td>
                       </tr>
                     );
@@ -926,8 +944,8 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
 }
 
 // ═════════════════════════ SUB-ABA: PEDIDOS ═════════════════════════════════
-function PedidosView({ pedidos, clientePorId, onJornada }: {
-  pedidos: Pedido[]; clientePorId: Record<string, Cliente>; onJornada: (c: Cliente) => void;
+function PedidosView({ pedidos, clientePorId, dic, onJornada }: {
+  pedidos: Pedido[]; clientePorId: Record<string, Cliente>; dic: Dic; onJornada: (c: Cliente) => void;
 }) {
   const [filtro, setFiltro] = useState<"todos" | "com" | "sem">("todos");
   const lista = useMemo(() => pedidos.filter((p) =>
@@ -939,7 +957,9 @@ function PedidosView({ pedidos, clientePorId, onJornada }: {
     return (
       <span className="inline-flex items-center gap-1.5 max-w-[190px]">
         <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CANAIS[k].cor }} />
-        <span className="text-neutral-700 truncate">{s.term || s.campaign || CANAIS[k].label}</span>
+        <span className="text-neutral-700 truncate" title={s.term || s.ad_id || s.campaign || ""}>
+          {traduzAd(dic, s.term, s.ad_id) || traduzCamp(dic, s.campaign, s.campaign_id) || CANAIS[k].label}
+        </span>
       </span>
     );
   };
@@ -1014,8 +1034,8 @@ function PedidosView({ pedidos, clientePorId, onJornada }: {
 }
 
 // ═════════════════════════ SUB-ABA: CLIENTES ════════════════════════════════
-function ClientesView({ pedidos, clientes, onJornada }: {
-  pedidos: Pedido[]; clientes: Cliente[]; onJornada: (c: Cliente) => void;
+function ClientesView({ pedidos, clientes, dic, onJornada }: {
+  pedidos: Pedido[]; clientes: Cliente[]; dic: Dic; onJornada: (c: Cliente) => void;
 }) {
   const [origemFiltro, setOrigemFiltro] = useState<"todos" | "com" | "sem">("todos");
   const linhas = useMemo(() => {
@@ -1069,7 +1089,9 @@ function ClientesView({ pedidos, clientes, onJornada }: {
                   <td className="px-2 py-2.5">
                     <span className="inline-flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full" style={{ background: CANAIS[k].cor }} />
-                      <span className="text-neutral-700">{primeiro ? (primeiro.term || primeiro.campaign || CANAIS[k].label) : "Direto / anterior ao rastreio"}</span>
+                      <span className="text-neutral-700" title={primeiro ? (primeiro.term || primeiro.ad_id || primeiro.campaign || "") : ""}>
+                        {primeiro ? (traduzAd(dic, primeiro.term, primeiro.ad_id) || traduzCamp(dic, primeiro.campaign, primeiro.campaign_id) || CANAIS[k].label) : "Direto / anterior ao rastreio"}
+                      </span>
                     </span>
                   </td>
                   <td className="px-2 py-2.5 text-right text-neutral-600">{nP}</td>
@@ -1094,7 +1116,7 @@ function ClientesView({ pedidos, clientes, onJornada }: {
 // ═════════════════ SUB-ABA: MONITOR DE REVENDAS ═════════════════════════════
 // Dados 100% separados da atribuição (tabela atr_revenda_eventos): confirma se
 // campanhas NOSSAS estão levando tráfego/compra pras lojas white-label.
-function MonitorRevendas({ intervalo }: { intervalo: Intervalo }) {
+function MonitorRevendas({ intervalo, dic }: { intervalo: Intervalo; dic: Dic }) {
   const [eventos, setEventos] = useState<RevendaEvento[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -1201,7 +1223,9 @@ function MonitorRevendas({ intervalo }: { intervalo: Intervalo }) {
                           ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded text-emerald-700 bg-emerald-50 border border-emerald-200">compra{e.pedido_id ? ` #${e.pedido_id}` : ""}</span>
                           : <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded text-indigo-600 bg-indigo-50 border border-indigo-100">toque</span>}
                       </td>
-                      <td className="px-2 py-2 text-neutral-700 max-w-[200px] truncate">{e.term || e.campaign || e.campaign_id || e.source || "—"}</td>
+                      <td className="px-2 py-2 text-neutral-700 max-w-[200px] truncate" title={e.term || e.ad_id || e.campaign || e.campaign_id || ""}>
+                        {traduzAd(dic, e.term, e.ad_id) || traduzCamp(dic, e.campaign, e.campaign_id) || e.source || "—"}
+                      </td>
                       <td className="px-2 py-2">
                         {e.campanha_nossa === true ? <span className="font-semibold text-red-600">SIM</span>
                           : e.campanha_nossa === false ? <span className="text-neutral-400">não</span>
@@ -1327,7 +1351,7 @@ function Legenda({ canais }: { canais: CanalKey[] }) {
 }
 
 // ── Drawer: visitante por vid (identificado → vira jornada do cliente) ───────
-function VidDrawer({ vid, onClose }: { vid: string; onClose: () => void }) {
+function VidDrawer({ vid, dic, onClose }: { vid: string; dic: Dic; onClose: () => void }) {
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [pronto, setPronto] = useState(false);
   const [tq, setTq] = useState<Toque[]>([]);
@@ -1350,15 +1374,15 @@ function VidDrawer({ vid, onClose }: { vid: string; onClose: () => void }) {
   }, [vid]);
 
   // identificado → reusa a jornada completa do cliente (todos os vids dele)
-  if (cliente) return <JornadaDrawer cliente={cliente} onClose={onClose} />;
+  if (cliente) return <JornadaDrawer cliente={cliente} dic={dic} onClose={onClose} />;
 
   const eventos = [
     ...tq.map((t) => {
       const k = canalDe(t.source, t.gclid, t.fbclid);
       return {
         quando: t.ocorrido_em, cor: CANAIS[k].cor,
-        titulo: t.term || t.campaign || CANAIS[k].label,
-        detalhe: [CANAIS[k].label, t.tipo && t.tipo !== "ad_click" ? t.tipo : null, t.medium, t.campaign, t.ad_id ? `ad #${t.ad_id}` : null].filter(Boolean).join(" · "),
+        titulo: traduzAd(dic, t.term, t.ad_id) || traduzCamp(dic, t.campaign, t.campaign_id) || CANAIS[k].label,
+        detalhe: [CANAIS[k].label, t.tipo && t.tipo !== "ad_click" ? t.tipo : null, t.medium, traduzCamp(dic, t.campaign, t.campaign_id), t.ad_id ? `ad #${t.ad_id}` : null].filter(Boolean).join(" · "),
         pedido: false,
       };
     }),
@@ -1408,7 +1432,7 @@ function VidDrawer({ vid, onClose }: { vid: string; onClose: () => void }) {
 }
 
 // ── Drawer: jornada do cliente ───────────────────────────────────────────────
-function JornadaDrawer({ cliente, onClose }: { cliente: Cliente; onClose: () => void }) {
+function JornadaDrawer({ cliente, dic, onClose }: { cliente: Cliente; dic: Dic; onClose: () => void }) {
   const [toques, setToques] = useState<Toque[]>([]);
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1436,14 +1460,14 @@ function JornadaDrawer({ cliente, onClose }: { cliente: Cliente; onClose: () => 
         const k = canalDe(t.source, t.gclid, t.fbclid);
         return {
           quando: t.ocorrido_em, tipo: "toque" as const,
-          titulo: t.term || t.campaign || CANAIS[k].label,
-          // UTMs completas do toque, visíveis no perfil
+          titulo: traduzAd(dic, t.term, t.ad_id) || traduzCamp(dic, t.campaign, t.campaign_id) || CANAIS[k].label,
+          // UTMs completas do toque (nomes traduzidos; IDs em segundo plano)
           detalhe: [
             CANAIS[k].label,
             t.source && t.source !== CANAIS[k].label.toLowerCase() ? `src: ${t.source}` : null,
             t.medium ? `medium: ${t.medium}` : null,
-            t.campaign ? `camp: ${t.campaign}` : null,
-            t.content ? `conj: ${t.content}` : null,
+            traduzCamp(dic, t.campaign, t.campaign_id) ? `camp: ${traduzCamp(dic, t.campaign, t.campaign_id)}` : null,
+            traduzConj(dic, t.content, t.adset_id) ? `conj: ${traduzConj(dic, t.content, t.adset_id)}` : null,
             t.ad_id ? `ad #${t.ad_id}` : null,
             t.tipo && t.tipo !== "ad_click" ? t.tipo : null,
           ].filter(Boolean).join(" · "),
@@ -1497,7 +1521,9 @@ function JornadaDrawer({ cliente, onClose }: { cliente: Cliente; onClose: () => 
                   <div className="text-[10px] uppercase tracking-wide text-neutral-400 font-semibold mb-1">Origem (1º toque)</div>
                   <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CANAIS[canalDe(origemPaga.source, origemPaga.gclid, origemPaga.fbclid)].cor }} />
-                    <span className="font-medium text-neutral-800 truncate">{origemPaga.term || origemPaga.campaign || origemPaga.source || "—"}</span>
+                    <span className="font-medium text-neutral-800 truncate" title={origemPaga.term || origemPaga.ad_id || origemPaga.campaign || ""}>
+                      {traduzAd(dic, origemPaga.term, origemPaga.ad_id) || traduzCamp(dic, origemPaga.campaign, origemPaga.campaign_id) || origemPaga.source || "—"}
+                    </span>
                   </div>
                   <div className="text-neutral-400 mt-0.5 truncate">{origemPaga.campaign ? `${origemPaga.campaign} · ` : ""}{dtHora(origemPaga.ocorrido_em)}</div>
                 </div>
@@ -1514,9 +1540,9 @@ function JornadaDrawer({ cliente, onClose }: { cliente: Cliente; onClose: () => 
                         </div>
                         {(p.primeiro_toque || p.ultimo_toque) ? (
                           <div className="text-[10px] text-neutral-400 truncate">
-                            via {p.primeiro_toque?.term || p.primeiro_toque?.campaign || "?"}
+                            via {traduzAd(dic, p.primeiro_toque?.term, p.primeiro_toque?.ad_id) || traduzCamp(dic, p.primeiro_toque?.campaign, p.primeiro_toque?.campaign_id) || "?"}
                             {p.ultimo_toque && p.primeiro_toque && p.ultimo_toque.ocorrido_em !== p.primeiro_toque.ocorrido_em
-                              ? ` → fechou: ${p.ultimo_toque.term || p.ultimo_toque.campaign || "?"}` : ""}
+                              ? ` → fechou: ${traduzAd(dic, p.ultimo_toque.term, p.ultimo_toque.ad_id) || traduzCamp(dic, p.ultimo_toque.campaign, p.ultimo_toque.campaign_id) || "?"}` : ""}
                           </div>
                         ) : (
                           <div className="text-[10px] text-neutral-300 italic">sem origem de campanha</div>
