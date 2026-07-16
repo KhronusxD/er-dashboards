@@ -27,12 +27,12 @@ type Pedido = {
   ultimo_toque: Snapshot;
 };
 type Cliente = { cliente_id: number; email: string; cnpj: string | null; nome: string | null; cpf?: string | null; telefone?: string | null; plataforma_id?: string | null };
-type Gasto = { dia: string; canal: string; campaign_id: string | null; campaign_name: string | null; ad_id: string | null; ad_name: string | null; gasto: number; plataforma_compras: number | null; plataforma_receita: number | null };
+type Gasto = { dia: string; canal: string; campaign_id: string | null; campaign_name: string | null; ad_id: string | null; ad_name: string | null; gasto: number; cliques: number | null; plataforma_compras: number | null; plataforma_receita: number | null };
 
 // toque de ANÚNCIO (pago) vs orgânico/direto (pistas — não levam crédito pago)
 const isAd = (t: Toque) => (t.tipo ?? "ad_click") === "ad_click";
 
-type CampRow = { key: string; nome: string; gasto: number; pCompras: number; pReceita: number; aCompras: number; aReceita: number };
+type CampRow = { key: string; nome: string; gasto: number; cliques: number; toques: number; pCompras: number; pReceita: number; aCompras: number; aReceita: number };
 
 // ── Períodos (mesmas opções do gerenciador de anúncios) ─────────────────────
 type PeriodoOpcao = "hoje" | "ontem" | "hoje_ontem" | "7d" | "14d" | "28d" | "30d" | "esta_semana" | "semana_passada" | "este_mes" | "mes_passado" | "max" | "custom";
@@ -163,7 +163,7 @@ export function AtribuicaoTab() {
         .select("pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque")
         .order("ocorrido_em", { ascending: false }).limit(2000),
       supabase.from("atr_clientes").select("cliente_id, email, cnpj, cpf, nome, telefone, plataforma_id").limit(3000),
-      supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, ad_id, ad_name, gasto, plataforma_compras, plataforma_receita").limit(8000),
+      supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, ad_id, ad_name, gasto, cliques, plataforma_compras, plataforma_receita").limit(8000),
     ]);
     setToques((tq as any) ?? []);
     setTotalToques(count ?? (tq as any[]).length);
@@ -357,8 +357,9 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
     for (const g of gastos) {
       const canal: "meta" | "google" = g.canal === "google" ? "google" : "meta";
       const key = g.campaign_id || g.campaign_name || "?";
-      const r = (grupos[canal][key] ??= { key, nome: g.campaign_name || key, gasto: 0, pCompras: 0, pReceita: 0, aCompras: 0, aReceita: 0 });
+      const r = (grupos[canal][key] ??= { key, nome: g.campaign_name || key, gasto: 0, cliques: 0, toques: 0, pCompras: 0, pReceita: 0, aCompras: 0, aReceita: 0 });
       r.gasto += Number(g.gasto) || 0;
+      r.cliques += Number(g.cliques) || 0;
       r.pCompras += Number(g.plataforma_compras) || 0;
       r.pReceita += Number(g.plataforma_receita) || 0;
       if (g.campaign_name) r.nome = g.campaign_name;
@@ -381,9 +382,21 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
       if (!key) continue;
       g[key].aCompras += 1; g[key].aReceita += Number(p.valor) || 0;
     }
+    // TOQUES por campanha (cliques que a UTM conseguiu rastrear) — mesma cascata de chave
+    for (const t of toques) {
+      if (!isAd(t)) continue;
+      const canal = canalDe(t.source, t.gclid, t.fbclid);
+      if (canal !== "meta" && canal !== "google") continue;
+      const g = grupos[canal];
+      const key = (t.campaign_id && g[t.campaign_id]) ? t.campaign_id
+        : (t.campaign && g[t.campaign]) ? t.campaign
+        : idx[canal][(t.campaign || "").trim().toLowerCase()];
+      if (!key) continue;
+      g[key].toques += 1;
+    }
     const lista = (c: "meta" | "google") => Object.values(grupos[c]).filter((r) => r.gasto > 0).sort((a, b) => b.gasto - a.gasto).slice(0, 12);
     return { meta: lista("meta"), google: lista("google") };
-  }, [gastos, pedidos, modelo]);
+  }, [gastos, pedidos, toques, modelo]);
 
   return (
     <>
@@ -1230,8 +1243,10 @@ function MiniKpi({ rotulo, valor }: { key?: React.Key; rotulo: string; valor: st
 }
 
 function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Key; titulo: string; cor: string; rows: CampRow[]; modelo: Modelo; rodape?: string }) {
-  const tot = rows.reduce((s, r) => ({ gasto: s.gasto + r.gasto, pC: s.pC + r.pCompras, pR: s.pR + r.pReceita, aC: s.aC + r.aCompras, aR: s.aR + r.aReceita }), { gasto: 0, pC: 0, pR: 0, aC: 0, aR: 0 });
+  const tot = rows.reduce((s, r) => ({ gasto: s.gasto + r.gasto, clq: s.clq + r.cliques, tq: s.tq + r.toques, pC: s.pC + r.pCompras, pR: s.pR + r.pReceita, aC: s.aC + r.aCompras, aR: s.aR + r.aReceita }), { gasto: 0, clq: 0, tq: 0, pC: 0, pR: 0, aC: 0, aR: 0 });
   const cobTot = tot.pC > 0 ? (tot.aC / tot.pC) * 100 : null;
+  const cobClqTot = tot.clq > 0 ? (tot.tq / tot.clq) * 100 : null;
+  const corCob = (v: number | null) => v == null ? "text-neutral-300" : v >= 50 ? "text-emerald-600" : "text-amber-600";
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden mt-4">
       <div className="px-4 py-3 border-b border-neutral-200 flex items-center gap-2 flex-wrap">
@@ -1248,6 +1263,9 @@ function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Ke
               <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
                 <th className="px-4 py-2">Campanha</th>
                 <th className="px-2 py-2 text-right">Gasto</th>
+                <th className="px-2 py-2 text-right" title="Cliques no link que a plataforma reporta">Cliques (plat.)</th>
+                <th className="px-2 py-2 text-right" title="Cliques que viraram toque com UTM no nosso rastreio">Toques (atrib.)</th>
+                <th className="px-2 py-2 text-right" title="Toques ÷ cliques — quanto do clique pago está sendo rastreado pela UTM">Cob. cliques</th>
                 <th className="px-2 py-2 text-right" title="Compras que o gerenciador atribui (janela da plataforma)">Compras (plat.)</th>
                 <th className="px-2 py-2 text-right">Receita (plat.)</th>
                 <th className="px-2 py-2 text-right" title="Pedidos que NOSSA atribuição ligou a esta campanha">Compras (atrib.)</th>
@@ -1262,6 +1280,11 @@ function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Ke
                   <tr key={c.key} className="hover:bg-neutral-50">
                     <td className="px-4 py-2.5 text-neutral-800 font-medium max-w-[260px] truncate" title={c.nome}>{c.nome}</td>
                     <td className="px-2 py-2.5 text-right text-neutral-600 whitespace-nowrap">{brl(c.gasto)}</td>
+                    <td className="px-2 py-2.5 text-right text-neutral-600">{c.cliques}</td>
+                    <td className="px-2 py-2.5 text-right font-semibold text-indigo-700">{c.toques}</td>
+                    <td className={`px-2 py-2.5 text-right font-semibold ${corCob(c.cliques > 0 ? (c.toques / c.cliques) * 100 : null)}`}>
+                      {c.cliques > 0 ? `${((c.toques / c.cliques) * 100).toFixed(0)}%` : "—"}
+                    </td>
                     <td className="px-2 py-2.5 text-right text-neutral-600">{c.pCompras}</td>
                     <td className="px-2 py-2.5 text-right text-neutral-600 whitespace-nowrap">{brl(c.pReceita)}</td>
                     <td className="px-2 py-2.5 text-right font-semibold text-indigo-700">{c.aCompras}</td>
@@ -1273,6 +1296,9 @@ function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Ke
               <tr className="bg-neutral-50 font-semibold text-neutral-800 border-t border-neutral-200">
                 <td className="px-4 py-2.5">Total</td>
                 <td className="px-2 py-2.5 text-right whitespace-nowrap">{brl(tot.gasto)}</td>
+                <td className="px-2 py-2.5 text-right">{tot.clq}</td>
+                <td className="px-2 py-2.5 text-right text-indigo-700">{tot.tq}</td>
+                <td className={`px-2 py-2.5 text-right ${corCob(cobClqTot)}`}>{cobClqTot == null ? "—" : `${cobClqTot.toFixed(0)}%`}</td>
                 <td className="px-2 py-2.5 text-right">{tot.pC}</td>
                 <td className="px-2 py-2.5 text-right whitespace-nowrap">{brl(tot.pR)}</td>
                 <td className="px-2 py-2.5 text-right text-indigo-700">{tot.aC}</td>

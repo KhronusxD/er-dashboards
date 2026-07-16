@@ -33,7 +33,7 @@ while : ; do
   if [ -z "$NEXT" ]; then
     curl -s -m 60 -G "$URL" \
       --data-urlencode "level=ad" \
-      --data-urlencode "fields=ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks,actions,action_values" \
+      --data-urlencode "fields=ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,inline_link_clicks,actions,action_values" \
       --data-urlencode "time_range={\"since\":\"$SINCE\",\"until\":\"$UNTIL\"}" \
       --data-urlencode "time_increment=1" \
       --data-urlencode "limit=500" \
@@ -75,7 +75,8 @@ for line in open('/tmp/atr_gastos_rows.jsonl'):
         r.get('date_start'), esc(r.get('campaign_id')), esc(r.get('campaign_name')),
         esc(r.get('adset_id')), esc(r.get('adset_name')),
         esc(r.get('ad_id')), esc(r.get('ad_name')),
-        float(r.get('spend') or 0), int(r.get('impressions') or 0), int(r.get('clicks') or 0),
+        float(r.get('spend') or 0), int(r.get('impressions') or 0),
+        int(r.get('inline_link_clicks') or 0),  # cliques no LINK (o 'clicks' genérico infla)
         int(compras), receita))
 if not vals:
     open('/tmp/atr_gastos_upsert.sql','w').write('select 1;')
