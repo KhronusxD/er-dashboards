@@ -112,6 +112,10 @@ DECLARE
   v_pedido   text;
   v_primeiro jsonb;
   v_ultimo   jsonb;
+  v_host     text;
+  v_evt      text;
+  v_vidl     text;
+  v_nossa    boolean;
 BEGIN
   -- autenticação leve (token privado em atr_config, ilegível via API)
   SELECT valor INTO v_token FROM atr_config WHERE chave = 'track_token';
@@ -218,13 +222,96 @@ BEGIN
     RETURN jsonb_build_object('ok', true, 'evento', 'purchase',
                               'cliente_id', v_cliente,
                               'primeiro_toque', v_primeiro, 'ultimo_toque', v_ultimo);
+  -- ===== MONITOR: eventos de subdomínios de REVENDEDORES (tabela separada) =====
+  ELSIF v_type = 'monitor' THEN
+    v_host := coalesce(payload->>'host', '?');
+    v_evt  := coalesce(payload->>'evento', 'touch');
+    v_vidl := NULLIF(payload->>'vid_local', '');
+
+    IF v_evt = 'touch' THEN
+      -- dedup: recarregar a landing da revenda não é toque novo
+      IF EXISTS (
+        SELECT 1 FROM atr_revenda_eventos r
+        WHERE r.evento = 'touch' AND r.host = v_host
+          AND r.ocorrido_em > now() - interval '30 minutes'
+          AND coalesce(r.vid_local,'') = coalesce(v_vidl,'')
+          AND coalesce(r.campaign,'') = coalesce(payload->>'campaign','')
+          AND coalesce(r.term,'')     = coalesce(payload->>'term','')
+          AND coalesce(r.source,'')   = coalesce(payload->>'source','')
+      ) THEN
+        RETURN jsonb_build_object('ok', true, 'evento', 'monitor', 'dedup', true);
+      END IF;
+      -- classificador: a campanha do toque é NOSSA? (IDs/nomes reais em atr_gastos)
+      v_nossa :=
+        EXISTS (SELECT 1 FROM atr_gastos g WHERE NULLIF(payload->>'campaign_id','') IS NOT NULL AND g.campaign_id = payload->>'campaign_id')
+        OR EXISTS (SELECT 1 FROM atr_gastos g WHERE NULLIF(payload->>'ad_id','') IS NOT NULL AND g.ad_id = payload->>'ad_id')
+        OR EXISTS (SELECT 1 FROM atr_gastos g WHERE NULLIF(payload->>'campaign','') IS NOT NULL AND lower(g.campaign_name) = lower(payload->>'campaign'));
+      INSERT INTO atr_revenda_eventos (host, evento, vid_local, source, medium, campaign, content, term,
+                                       campaign_id, adset_id, ad_id, fbclid, gclid,
+                                       landing_url, referrer, device, campanha_nossa)
+      VALUES (v_host, 'touch', v_vidl,
+              payload->>'source', payload->>'medium', payload->>'campaign', payload->>'content', payload->>'term',
+              payload->>'campaign_id', payload->>'adset_id', payload->>'ad_id',
+              payload->>'fbclid', payload->>'gclid',
+              payload->>'landing', payload->>'referrer', payload->>'device', v_nossa);
+      RETURN jsonb_build_object('ok', true, 'evento', 'monitor', 'campanha_nossa', v_nossa);
+
+    ELSE  -- purchase na loja de revenda (SEM dados pessoais do cliente da revenda)
+      IF NULLIF(payload->>'pedido_id','') IS NULL THEN RAISE EXCEPTION 'pedido_id requerido'; END IF;
+      IF EXISTS (SELECT 1 FROM atr_revenda_eventos WHERE evento = 'purchase' AND pedido_id = payload->>'pedido_id') THEN
+        RETURN jsonb_build_object('ok', true, 'evento', 'monitor', 'dedup', true);
+      END IF;
+      -- herda a campanha do último toque do MESMO visitante local (cookie do host)
+      INSERT INTO atr_revenda_eventos (host, evento, vid_local, pedido_id, valor,
+                                       source, campaign, term, campaign_id, adset_id, ad_id,
+                                       landing_url, referrer, device, campanha_nossa)
+      SELECT v_host, 'purchase', v_vidl,
+             payload->>'pedido_id', NULLIF(payload->>'valor','')::numeric,
+             t.source, t.campaign, t.term, t.campaign_id, t.adset_id, t.ad_id,
+             payload->>'landing', payload->>'referrer', payload->>'device',
+             t.campanha_nossa           -- null = compra sem toque de campanha conhecido
+      FROM (SELECT 1) um
+      LEFT JOIN LATERAL (
+        SELECT source, campaign, term, campaign_id, adset_id, ad_id, campanha_nossa
+        FROM atr_revenda_eventos
+        WHERE evento = 'touch' AND host = v_host
+          AND v_vidl IS NOT NULL AND vid_local = v_vidl
+          AND ocorrido_em > now() - interval '30 days'
+        ORDER BY ocorrido_em DESC LIMIT 1
+      ) t ON true;
+      RETURN jsonb_build_object('ok', true, 'evento', 'monitor');
+    END IF;
   END IF;
 
-  RAISE EXCEPTION 'type inválido: % (use touch|identify|purchase)', v_type;
+  RAISE EXCEPTION 'type inválido: % (use touch|identify|purchase|monitor)', v_type;
 END $$;
 
 REVOKE ALL ON FUNCTION napan.track(jsonb) FROM public;
 GRANT EXECUTE ON FUNCTION napan.track(jsonb) TO anon, authenticated, service_role;
+
+-- ---------- 2b. MONITOR DE REVENDAS (subdomínios white-label) ----------
+-- Eventos de campanha/compra em lojas de REVENDEDORES (oferta., atualgraf., ...).
+-- Tabela SEPARADA de propósito: consulta/confirmação de vazamento, não entra
+-- na atribuição principal. Sem PII do cliente da revenda (LGPD).
+
+CREATE TABLE IF NOT EXISTS napan.atr_revenda_eventos (
+  id             bigserial PRIMARY KEY,
+  ocorrido_em    timestamptz NOT NULL DEFAULT now(),
+  host           text NOT NULL,          -- oferta.atualcard.com.br etc.
+  evento         text NOT NULL,          -- touch | purchase
+  vid_local      text,                   -- cookie local do host (liga toque→compra na revenda)
+  source text, medium text, campaign text, content text, term text,
+  campaign_id text, adset_id text, ad_id text,
+  fbclid text, gclid text,
+  pedido_id text, valor numeric,
+  landing_url text, referrer text, device text,
+  campanha_nossa boolean                  -- true = casa com IDs/nomes das NOSSAS campanhas (atr_gastos)
+);
+CREATE INDEX IF NOT EXISTS atr_revenda_host_idx  ON napan.atr_revenda_eventos(host, evento);
+CREATE INDEX IF NOT EXISTS atr_revenda_nossa_idx ON napan.atr_revenda_eventos(campanha_nossa, evento);
+GRANT SELECT ON napan.atr_revenda_eventos TO anon, authenticated;
+GRANT ALL ON napan.atr_revenda_eventos TO service_role;
+REVOKE INSERT, UPDATE, DELETE ON napan.atr_revenda_eventos FROM anon, authenticated;
 
 -- ---------- 3. Gasto por anúncio (alimentado pelo sync_gastos_meta.sh) ----------
 

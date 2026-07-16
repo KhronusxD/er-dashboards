@@ -39,8 +39,9 @@ e captura de orgânico/direto.
 ```html
 <script>
 (function () {
-  // ESCOPO: só a loja principal (subdomínios são lojas de REVENDEDORES).
-  if (location.hostname !== 'www.atualcard.com.br') return;
+  // v4: fora do www NÃO entra na atribuição — vira evento de MONITOR de revendas
+  // (confirma se campanhas NOSSAS estão levando tráfego/compra pras lojas white-label)
+  var MONITOR = location.hostname !== 'www.atualcard.com.br';
   function getCookie(n){var m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():''}
   function uuid(){
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -58,6 +59,25 @@ e captura de orgânico/direto.
   // 2) decide o tipo do toque
   var p = new URLSearchParams(window.location.search);
   var temCampanha = p.get('utm_source') || p.get('fbclid') || p.get('gclid');
+
+  if (MONITOR) {
+    if (!temCampanha) return;   // na revenda só interessa chegada de CAMPANHA
+    var pm = {
+      token: '{{ATRIB · token}}', type: 'monitor', evento: 'touch',
+      host: location.hostname, vid_local: vid,
+      source: deco(p.get('utm_source')) || (p.get('gclid') ? 'google' : (p.get('fbclid') ? 'facebook' : null)),
+      medium: deco(p.get('utm_medium')), campaign: deco(p.get('utm_campaign')),
+      content: deco(p.get('utm_content')), term: deco(p.get('utm_term')),
+      campaign_id: p.get('camp_id'), adset_id: p.get('adset_id'), ad_id: p.get('ad_id'),
+      fbclid: p.get('fbclid'), gclid: p.get('gclid'),
+      landing: location.href.split('#')[0].substring(0, 500),
+      referrer: (document.referrer || '').substring(0, 300),
+      device: /iPhone|iPad|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
+    };
+    try { fetch('{{ATRIB · url}}', { method: 'POST', headers: { 'apikey': '{{ATRIB · anon}}', 'Content-Profile': 'napan', 'Content-Type': 'application/json' }, body: JSON.stringify({ payload: pm }), keepalive: true }); } catch (e) {}
+    return;
+  }
+
   var jaNaSessao = false; try { jaNaSessao = sessionStorage.getItem('nap_t') === '1'; } catch(e) {}
   var ref = document.referrer || '';
   var refExterno = ref !== '' && ref.indexOf('atualcard.com.br') === -1;
@@ -127,9 +147,22 @@ Código FINAL da tag (colar como está):
 ```html
 <script>
 (function () {
-  // Mesma trava de escopo da Tag 1: compra só conta na loja principal
-  if (location.hostname !== 'www.atualcard.com.br') return;
+  // v4: compra em REVENDA vira evento de MONITOR (sem dados pessoais do cliente da revenda)
+  var MONITOR = location.hostname !== 'www.atualcard.com.br';
   function getCookie(n){var m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():''}
+  if (MONITOR) {
+    var pm = {
+      token: '{{ATRIB · token}}', type: 'monitor', evento: 'purchase',
+      host: location.hostname, vid_local: getCookie('nap_vid') || null,
+      pedido_id: String({{DL · pedido_id}} || ''), valor: String({{DL · valor}} || ''),
+      landing: location.href.split('#')[0].substring(0, 300),
+      referrer: (document.referrer || '').substring(0, 300),
+      device: /iPhone|iPad|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
+    };
+    if (!pm.pedido_id) return;
+    try { fetch('{{ATRIB · url}}', { method: 'POST', headers: { 'apikey': '{{ATRIB · anon}}', 'Content-Profile': 'napan', 'Content-Type': 'application/json' }, body: JSON.stringify({ payload: pm }), keepalive: true }); } catch (e) {}
+    return;
+  }
   var nome = [{{DL · nome}}, {{DL · sobrenome}}].filter(Boolean).join(' ');
   var payload = {
     token: '{{ATRIB · token}}',
