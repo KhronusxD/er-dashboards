@@ -87,7 +87,14 @@ type Toque = {
 };
 
 type Modelo = "primeiro" | "ultimo";
-type SubTab = "visao" | "origens" | "criativos" | "pedidos" | "clientes";
+type SubTab = "visao" | "origens" | "criativos" | "pedidos" | "clientes" | "revendas";
+type RevendaEvento = {
+  id: number; ocorrido_em: string; host: string; evento: string; vid_local: string | null;
+  source: string | null; campaign: string | null; term: string | null;
+  campaign_id: string | null; ad_id: string | null;
+  pedido_id: string | null; valor: number | null;
+  campanha_nossa: boolean | null;
+};
 const SEM_ATRIB = "(sem origem registrada)";
 
 // ── Canais (paleta validada p/ daltonismo — dataviz) ─────────────────────────
@@ -184,6 +191,7 @@ export function AtribuicaoTab() {
     { k: "criativos", l: "Criativos & Campanhas", Ic: Sparkles },
     { k: "pedidos", l: "Pedidos", Ic: ShoppingCart },
     { k: "clientes", l: "Clientes", Ic: Users },
+    { k: "revendas", l: "Monitor Revendas", Ic: Radio },
   ];
 
   return (
@@ -250,6 +258,7 @@ export function AtribuicaoTab() {
       {!vazio && sub === "criativos" && <Criativos pedidos={pedidosF} toques={toquesF} gastos={gastosF} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidosF} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "clientes" && <ClientesView pedidos={pedidosF} clientes={clientes} onJornada={setJornadaDe} />}
+      {!vazio && sub === "revendas" && <MonitorRevendas intervalo={intervalo} />}
 
       {loading && <p className="text-xs text-neutral-400">Carregando...</p>}
       {jornadaDe && <JornadaDrawer cliente={jornadaDe} onClose={() => setJornadaDe(null)} />}
@@ -1039,6 +1048,137 @@ function ClientesView({ pedidos, clientes, onJornada }: {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ═════════════════ SUB-ABA: MONITOR DE REVENDAS ═════════════════════════════
+// Dados 100% separados da atribuição (tabela atr_revenda_eventos): confirma se
+// campanhas NOSSAS estão levando tráfego/compra pras lojas white-label.
+function MonitorRevendas({ intervalo }: { intervalo: Intervalo }) {
+  const [eventos, setEventos] = useState<RevendaEvento[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase.from("atr_revenda_eventos")
+        .select("id, ocorrido_em, host, evento, vid_local, source, campaign, term, campaign_id, ad_id, pedido_id, valor, campanha_nossa")
+        .order("ocorrido_em", { ascending: false }).limit(2000);
+      setEventos((data as any) ?? []);
+      setLoading(false);
+    })();
+  }, []);
+
+  const evs = useMemo(() => eventos.filter((e) => {
+    const t = new Date(e.ocorrido_em).getTime();
+    return t >= intervalo.ini && t <= intervalo.fim;
+  }), [eventos, intervalo]);
+
+  const toquesNossos = evs.filter((e) => e.evento === "touch" && e.campanha_nossa === true);
+  const toquesAlheios = evs.filter((e) => e.evento === "touch" && e.campanha_nossa === false);
+  const compras = evs.filter((e) => e.evento === "purchase");
+  const comprasNossas = compras.filter((e) => e.campanha_nossa === true);
+  const vazamentoReais = comprasNossas.reduce((s, e) => s + (Number(e.valor) || 0), 0);
+
+  const porHost = useMemo(() => {
+    const m: Record<string, { tNossa: number; tAlheia: number; cNossa: number; rNossa: number; cTotal: number }> = {};
+    for (const e of evs) {
+      const r = (m[e.host] ??= { tNossa: 0, tAlheia: 0, cNossa: 0, rNossa: 0, cTotal: 0 });
+      if (e.evento === "touch") { if (e.campanha_nossa) r.tNossa += 1; else r.tAlheia += 1; }
+      else { r.cTotal += 1; if (e.campanha_nossa) { r.cNossa += 1; r.rNossa += Number(e.valor) || 0; } }
+    }
+    return Object.entries(m).sort((a, b) => (b[1].cNossa - a[1].cNossa) || (b[1].tNossa - a[1].tNossa));
+  }, [evs]);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-3.5 text-xs text-amber-800">
+        <b>O que é isto:</b> eventos capturados nas lojas de REVENDEDORES (oferta., atualgraf., ...) — separados da atribuição principal.
+        "Campanha nossa" = o toque/compra casou com os IDs/nomes reais das campanhas da AtualCard. <b>Compra com campanha nossa = vazamento</b>: sua mídia pagou uma venda que aconteceu na loja do revendedor.
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Kpi icone={<MousePointerClick className="w-4 h-4" />} rotulo="Toques c/ campanha NOSSA" valor={String(toquesNossos.length)} />
+        <Kpi icone={<MousePointerClick className="w-4 h-4" />} rotulo="Toques de campanha alheia" valor={String(toquesAlheios.length)} />
+        <Kpi icone={<ShoppingCart className="w-4 h-4" />} rotulo="Compras em revenda (total)" valor={String(compras.length)} />
+        <Kpi icone={<Receipt className="w-4 h-4" />} rotulo="VAZAMENTO (compras nossas)" valor={`${comprasNossas.length} · ${brl(vazamentoReais)}`} destaque={comprasNossas.length > 0 ? "sua mídia pagando venda de revenda" : undefined} />
+      </div>
+
+      {!loading && evs.length === 0 && (
+        <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-8 text-center">
+          <Radio className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
+          <p className="text-sm font-medium text-neutral-600">Nenhum evento de revenda no período (ainda)</p>
+          <p className="text-xs text-neutral-400 mt-1 max-w-md mx-auto">
+            O monitor grava quando alguém chega numa loja de revendedor <b>vindo de campanha</b> (utm/fbclid/gclid) ou compra lá.
+            Se continuar zerado por dias, é ótimo sinal: suas campanhas não estão vazando.
+          </p>
+        </div>
+      )}
+
+      {evs.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
+            <h3 className="text-sm font-semibold text-neutral-700 mb-2">Por loja de revenda</h3>
+            <div className="space-y-2">
+              {porHost.map(([host, r]) => (
+                <div key={host} className="rounded-xl border border-neutral-200 p-2.5 text-xs">
+                  <div className="font-mono font-medium text-neutral-800 truncate">{host}</div>
+                  <div className="text-neutral-500 mt-1">
+                    toques: <b className="text-indigo-600">{r.tNossa} nossos</b> · {r.tAlheia} alheios
+                  </div>
+                  <div className="text-neutral-500">
+                    compras: {r.cTotal} {r.cNossa > 0 && <b className="text-red-600">· {r.cNossa} de campanha NOSSA ({brl(r.rNossa)})</b>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
+              <span className="text-sm font-semibold text-neutral-700">Eventos recentes</span>
+              <span className="text-xs text-neutral-400">{evs.length} no período</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
+                    <th className="px-4 py-2">Quando</th>
+                    <th className="px-2 py-2">Loja</th>
+                    <th className="px-2 py-2">Evento</th>
+                    <th className="px-2 py-2">Campanha</th>
+                    <th className="px-2 py-2">Nossa?</th>
+                    <th className="px-2 py-2 text-right">Valor</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-50">
+                  {evs.slice(0, 60).map((e) => (
+                    <tr key={e.id} className="hover:bg-neutral-50">
+                      <td className="px-4 py-2 text-neutral-500 whitespace-nowrap">{dtHora(e.ocorrido_em)}</td>
+                      <td className="px-2 py-2 font-mono text-neutral-600 max-w-[150px] truncate">{e.host.replace(".atualcard.com.br", ".")}</td>
+                      <td className="px-2 py-2">
+                        {e.evento === "purchase"
+                          ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded text-emerald-700 bg-emerald-50 border border-emerald-200">compra{e.pedido_id ? ` #${e.pedido_id}` : ""}</span>
+                          : <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded text-indigo-600 bg-indigo-50 border border-indigo-100">toque</span>}
+                      </td>
+                      <td className="px-2 py-2 text-neutral-700 max-w-[200px] truncate">{e.term || e.campaign || e.campaign_id || e.source || "—"}</td>
+                      <td className="px-2 py-2">
+                        {e.campanha_nossa === true ? <span className="font-semibold text-red-600">SIM</span>
+                          : e.campanha_nossa === false ? <span className="text-neutral-400">não</span>
+                          : <span className="text-neutral-300">?</span>}
+                      </td>
+                      <td className="px-2 py-2 text-right font-semibold text-neutral-800 whitespace-nowrap">{e.valor != null ? brl(Number(e.valor)) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading && <p className="text-xs text-neutral-400">Carregando monitor...</p>}
     </div>
   );
 }
