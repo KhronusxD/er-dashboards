@@ -254,7 +254,7 @@ export function AtribuicaoTab() {
       )}
 
       {!vazio && sub === "visao" && <VisaoGeral toques={toquesF} pedidos={pedidosF} gastos={gastosF} modelo={modelo} totalToques={totalToquesF} intervalo={intervalo} />}
-      {!vazio && sub === "origens" && <Origens toques={toquesF} pedidos={pedidosF} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
+      {!vazio && sub === "origens" && <Origens toques={toquesF} pedidos={pedidosF} gastos={gastos} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
       {!vazio && sub === "criativos" && <Criativos pedidos={pedidosF} toques={toquesF} gastos={gastosF} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidosF} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "clientes" && <ClientesView pedidos={pedidosF} clientes={clientes} onJornada={setJornadaDe} />}
@@ -516,13 +516,26 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
 }
 
 // ═════════════════════════ SUB-ABA: ORIGENS (UTMs) ══════════════════════════
-function Origens({ toques, pedidos, modelo, clientePorId, onAbrirVid, onJornada }: {
-  toques: Toque[]; pedidos: Pedido[]; modelo: Modelo;
+function Origens({ toques, pedidos, gastos, modelo, clientePorId, onAbrirVid, onJornada }: {
+  toques: Toque[]; pedidos: Pedido[]; gastos: Gasto[]; modelo: Modelo;
   clientePorId: Record<string, Cliente>;
   onAbrirVid: (vid: string) => void; onJornada: (c: Cliente) => void;
 }) {
   const [visao, setVisao] = useState<"toques" | "pedidos">("toques");
   const [filtroCanal, setFiltroCanal] = useState<CanalKey | "all">("all");
+
+  // Dicionário ID→nome (do sync de gasto, SEM filtro de período) — traduz o
+  // utm_campaign={campaignid} do Google pro nome oficial; o valor cru fica no hover
+  const nomeCampanha = useMemo(() => {
+    const d: Record<string, string> = {};
+    for (const g of gastos) if (g.campaign_id && g.campaign_name) d[g.campaign_id] = g.campaign_name;
+    return d;
+  }, [gastos]);
+  const campanhaDe = useCallback((campaign?: string | null, campaign_id?: string | null) => {
+    const cru = campaign || campaign_id || "";
+    const nome = (campaign_id && nomeCampanha[campaign_id]) || (campaign && nomeCampanha[campaign]) || null;
+    return { texto: nome || cru || "—", cru, traduzido: !!nome && nome !== cru };
+  }, [nomeCampanha]);
   // período vem do filtro GLOBAL da aba (props já chegam filtradas)
 
   const toquesF = useMemo(() => toques.filter((t) =>
@@ -609,7 +622,11 @@ function Origens({ toques, pedidos, modelo, clientePorId, onAbrirVid, onJornada 
                         <td className="px-2 py-2 whitespace-nowrap">
                           <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ color: tp.c, background: `${tp.c}18`, border: `1px solid ${tp.c}44` }}>{tp.l}</span>
                         </td>
-                        <td className="px-2 py-2 text-neutral-600 max-w-[160px] truncate">{t.campaign || t.campaign_id || "—"}</td>
+                        <td className="px-2 py-2 text-neutral-600 max-w-[160px] truncate">
+                          {(() => { const c = campanhaDe(t.campaign, t.campaign_id); return (
+                            <span title={c.cru}>{c.texto}{c.traduzido && <span className="text-[9px] text-indigo-400 ml-1" title={`traduzido do id ${c.cru}`}>id→</span>}</span>
+                          ); })()}
+                        </td>
                         <td className="px-2 py-2 text-neutral-800 font-medium max-w-[200px] truncate">{t.term || t.content || "—"}</td>
                         <td className="px-2 py-2 text-neutral-400 font-mono">{t.ad_id || "—"}</td>
                         <td className="px-2 py-2 text-neutral-500">{t.device || "—"}</td>
@@ -646,7 +663,9 @@ function Origens({ toques, pedidos, modelo, clientePorId, onAbrirVid, onJornada 
                             <span className="text-neutral-700">{s ? (s.source || CANAIS[k].label) : "direto"}</span>
                           </span>
                         </td>
-                        <td className="px-2 py-2 text-neutral-600 max-w-[160px] truncate">{s?.campaign || "—"}</td>
+                        <td className="px-2 py-2 text-neutral-600 max-w-[160px] truncate">
+                          {(() => { const c = campanhaDe(s?.campaign, s?.campaign_id); return <span title={c.cru}>{c.texto}</span>; })()}
+                        </td>
                         <td className="px-2 py-2 text-neutral-800 max-w-[180px] truncate">{s?.term || s?.ad_id || "—"}</td>
                         <td className="px-2 py-2 text-right font-semibold text-neutral-800 whitespace-nowrap">{p.valor != null ? brl(Number(p.valor)) : "—"}</td>
                       </tr>
