@@ -33,6 +33,50 @@ type Gasto = { dia: string; canal: string; campaign_id: string | null; campaign_
 const isAd = (t: Toque) => (t.tipo ?? "ad_click") === "ad_click";
 
 type CampRow = { key: string; nome: string; gasto: number; pCompras: number; pReceita: number; aCompras: number; aReceita: number };
+
+// ── Períodos (mesmas opções do gerenciador de anúncios) ─────────────────────
+type PeriodoOpcao = "hoje" | "ontem" | "hoje_ontem" | "7d" | "14d" | "28d" | "30d" | "esta_semana" | "semana_passada" | "este_mes" | "mes_passado" | "max" | "custom";
+const PERIODOS: { v: PeriodoOpcao; l: string }[] = [
+  { v: "hoje", l: "Hoje" },
+  { v: "ontem", l: "Ontem" },
+  { v: "hoje_ontem", l: "Hoje e ontem" },
+  { v: "7d", l: "Últimos 7 dias" },
+  { v: "14d", l: "Últimos 14 dias" },
+  { v: "28d", l: "Últimos 28 dias" },
+  { v: "30d", l: "Últimos 30 dias" },
+  { v: "esta_semana", l: "Esta semana" },
+  { v: "semana_passada", l: "Semana passada" },
+  { v: "este_mes", l: "Este mês" },
+  { v: "mes_passado", l: "Mês passado" },
+  { v: "max", l: "Máximo" },
+  { v: "custom", l: "Personalizado" },
+];
+type Intervalo = { ini: number; fim: number };
+function intervaloPeriodo(op: PeriodoOpcao, ci: string, cf: string): Intervalo {
+  const agora = new Date();
+  const d0 = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate()).getTime(); // hoje 00:00
+  const DIA = 86400000;
+  const fimHoje = d0 + DIA - 1;
+  const ultimos = (n: number) => ({ ini: d0 - (n - 1) * DIA, fim: fimHoje });
+  switch (op) {
+    case "hoje": return { ini: d0, fim: fimHoje };
+    case "ontem": return { ini: d0 - DIA, fim: d0 - 1 };
+    case "hoje_ontem": return { ini: d0 - DIA, fim: fimHoje };
+    case "7d": return ultimos(7);
+    case "14d": return ultimos(14);
+    case "28d": return ultimos(28);
+    case "30d": return ultimos(30);
+    case "esta_semana": return { ini: d0 - new Date(d0).getDay() * DIA, fim: fimHoje };
+    case "semana_passada": { const dom = d0 - new Date(d0).getDay() * DIA; return { ini: dom - 7 * DIA, fim: dom - 1 }; }
+    case "este_mes": return { ini: new Date(agora.getFullYear(), agora.getMonth(), 1).getTime(), fim: fimHoje };
+    case "mes_passado": return { ini: new Date(agora.getFullYear(), agora.getMonth() - 1, 1).getTime(), fim: new Date(agora.getFullYear(), agora.getMonth(), 1).getTime() - 1 };
+    case "custom": return {
+      ini: ci ? new Date(ci + "T00:00:00").getTime() : 0,
+      fim: cf ? new Date(cf + "T23:59:59.999").getTime() : fimHoje,
+    };
+    default: return { ini: 0, fim: fimHoje }; // máximo
+  }
+}
 type Toque = {
   id: number; vid: string; ocorrido_em: string; tipo: string | null;
   source: string | null; medium: string | null; campaign: string | null;
@@ -81,7 +125,9 @@ export function AtribuicaoTab() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [loading, setLoading] = useState(true);
   const [modelo, setModelo] = useState<Modelo>("primeiro");
-  const [periodo, setPeriodo] = useState<7 | 14 | 30 | 0>(14);
+  const [periodoOpcao, setPeriodoOpcao] = useState<PeriodoOpcao>("14d");
+  const [customIni, setCustomIni] = useState("");
+  const [customFim, setCustomFim] = useState("");
   const [jornadaDe, setJornadaDe] = useState<Cliente | null>(null);
   const [vidAberto, setVidAberto] = useState<string | null>(null);
 
@@ -124,12 +170,13 @@ export function AtribuicaoTab() {
   const clientePorId = useMemo(() => Object.fromEntries(clientes.map((c) => [c.cliente_id, c])), [clientes]);
   const vazio = !loading && toques.length === 0 && pedidos.length === 0;
 
-  // Filtro GLOBAL de período — vale pra todas as sub-abas (toques, pedidos e gasto)
-  const corte = periodo ? Date.now() - periodo * 86400000 : 0;
-  const toquesF = useMemo(() => (corte ? toques.filter((t) => new Date(t.ocorrido_em).getTime() >= corte) : toques), [toques, corte]);
-  const pedidosF = useMemo(() => (corte ? pedidos.filter((p) => new Date(p.ocorrido_em).getTime() >= corte) : pedidos), [pedidos, corte]);
-  const gastosF = useMemo(() => (corte ? gastos.filter((g) => new Date(g.dia + "T23:59:59").getTime() >= corte) : gastos), [gastos, corte]);
-  const totalToquesF = periodo ? toquesF.length : totalToques;
+  // Filtro GLOBAL de período (intervalo com início E fim) — vale pra todas as sub-abas
+  const intervalo = useMemo(() => intervaloPeriodo(periodoOpcao, customIni, customFim), [periodoOpcao, customIni, customFim]);
+  const dentro = useCallback((iso: string) => { const t = new Date(iso).getTime(); return t >= intervalo.ini && t <= intervalo.fim; }, [intervalo]);
+  const toquesF = useMemo(() => toques.filter((t) => dentro(t.ocorrido_em)), [toques, dentro]);
+  const pedidosF = useMemo(() => pedidos.filter((p) => dentro(p.ocorrido_em)), [pedidos, dentro]);
+  const gastosF = useMemo(() => gastos.filter((g) => dentro(g.dia + "T12:00:00")), [gastos, dentro]);
+  const totalToquesF = periodoOpcao === "max" ? totalToques : toquesF.length;
 
   const SUBS: { k: SubTab; l: string; Ic: any }[] = [
     { k: "visao", l: "Visão Geral", Ic: LayoutDashboard },
@@ -153,14 +200,21 @@ export function AtribuicaoTab() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-        <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-1" title="Período — vale pra TODAS as sub-abas">
-          {([[7, "7d"], [14, "14d"], [30, "30d"], [0, "Tudo"]] as const).map(([v, l]) => (
-            <button key={v} onClick={() => setPeriodo(v as any)}
-              className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors ${periodo === v ? "bg-white text-indigo-700 shadow-sm border border-neutral-200" : "text-neutral-500 hover:text-neutral-800"}`}>
-              {l}
-            </button>
-          ))}
-        </div>
+        <select value={periodoOpcao} onChange={(e) => setPeriodoOpcao(e.target.value as PeriodoOpcao)}
+          title="Período — vale pra TODAS as sub-abas"
+          className="text-xs font-medium border border-neutral-200 rounded-lg pl-2.5 pr-7 py-2 bg-neutral-50 text-neutral-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer appearance-none"
+          style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23737373' fill='none' stroke-width='1.5'/></svg>\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}>
+          {PERIODOS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+        </select>
+        {periodoOpcao === "custom" && (
+          <span className="inline-flex items-center gap-1">
+            <input type="date" value={customIni} onChange={(e) => setCustomIni(e.target.value)}
+              className="text-xs border border-neutral-200 rounded-lg px-2 py-1.5 bg-white text-neutral-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <span className="text-neutral-400 text-xs">a</span>
+            <input type="date" value={customFim} onChange={(e) => setCustomFim(e.target.value)}
+              className="text-xs border border-neutral-200 rounded-lg px-2 py-1.5 bg-white text-neutral-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </span>
+        )}
         <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-1">
           {([["primeiro", "1º toque"], ["ultimo", "Último toque"]] as const).map(([v, label]) => (
             <button key={v} onClick={() => setModelo(v)}
@@ -191,7 +245,7 @@ export function AtribuicaoTab() {
         </div>
       )}
 
-      {!vazio && sub === "visao" && <VisaoGeral toques={toquesF} pedidos={pedidosF} gastos={gastosF} modelo={modelo} totalToques={totalToquesF} periodo={periodo} />}
+      {!vazio && sub === "visao" && <VisaoGeral toques={toquesF} pedidos={pedidosF} gastos={gastosF} modelo={modelo} totalToques={totalToquesF} intervalo={intervalo} />}
       {!vazio && sub === "origens" && <Origens toques={toquesF} pedidos={pedidosF} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
       {!vazio && sub === "criativos" && <Criativos pedidos={pedidosF} toques={toquesF} gastos={gastosF} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidosF} clientePorId={clientePorId} onJornada={setJornadaDe} />}
@@ -205,8 +259,23 @@ export function AtribuicaoTab() {
 }
 
 // ═════════════════════════ SUB-ABA: VISÃO GERAL ═════════════════════════════
-function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, periodo }: { toques: Toque[]; pedidos: Pedido[]; gastos: Gasto[]; modelo: Modelo; totalToques: number; periodo: number }) {
-  const janela = periodo === 0 ? 30 : periodo; // janela dos gráficos diários
+function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }: { toques: Toque[]; pedidos: Pedido[]; gastos: Gasto[]; modelo: Modelo; totalToques: number; intervalo: Intervalo }) {
+  // Dias do intervalo selecionado (ancorados no FIM do período; máx. 60 barras)
+  const janelaDias = useMemo(() => {
+    const DIA = 86400000;
+    const f = new Date(intervalo.fim);
+    const fim0 = new Date(f.getFullYear(), f.getMonth(), f.getDate()).getTime();
+    const ini0 = intervalo.ini > 0
+      ? (() => { const i = new Date(intervalo.ini); return new Date(i.getFullYear(), i.getMonth(), i.getDate()).getTime(); })()
+      : fim0 - 29 * DIA;
+    const n = Math.min(60, Math.max(1, Math.round((fim0 - ini0) / DIA) + 1));
+    const dias: { key: string; label: string }[] = [];
+    for (let k = n - 1; k >= 0; k--) {
+      const d = new Date(fim0 - k * DIA);
+      dias.push({ key: d.toISOString().slice(0, 10), label: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}` });
+    }
+    return dias;
+  }, [intervalo]);
   const receita = useMemo(() => pedidos.reduce((s, p) => s + (Number(p.valor) || 0), 0), [pedidos]);
   const clientesUnicos = useMemo(() => new Set(pedidos.map((p) => p.cliente_id).filter(Boolean)).size, [pedidos]);
   const comOrigem = useMemo(() => pedidos.filter((p) => p.primeiro_toque).length, [pedidos]);
@@ -218,14 +287,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, periodo }: {
 
   // Série diária (14 dias) empilhada por canal
   const serieDiaria = useMemo(() => {
-    const hoje = new Date();
-    const diasArr: { dia: string; label: string }[] = [];
-    for (let i = janela - 1; i >= 0; i--) {
-      const d = new Date(hoje); d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      diasArr.push({ dia: key, label: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}` });
-    }
-    const base = diasArr.map((d) => ({ label: d.label, dia: d.dia, google: 0, meta: 0, teste: 0, outros: 0, direto: 0 }));
+    const base = janelaDias.map((d) => ({ label: d.label, dia: d.key, google: 0, meta: 0, teste: 0, outros: 0, direto: 0 }));
     const idx = Object.fromEntries(base.map((b, i) => [b.dia, i]));
     for (const t of toques) {
       if (!isAd(t)) continue;                       // gráfico = toques de anúncio
@@ -234,7 +296,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, periodo }: {
       (base[idx[k]] as any)[canalDe(t.source, t.gclid, t.fbclid)] += 1;
     }
     return base;
-  }, [toques, janela]);
+  }, [toques, janelaDias]);
 
   // Donut por canal (toques) + receita por canal (pedidos, modelo escolhido)
   const porCanalToques = useMemo(() => {
@@ -262,20 +324,15 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, periodo }: {
 
   // Pedidos por dia (14d) — a leitura principal: com origem (por canal) vs sem origem (cinza)
   const pedidosSerie = useMemo(() => {
-    const hoje = new Date();
     const base: any[] = []; const idx: Record<string, number> = {};
-    for (let i = janela - 1; i >= 0; i--) {
-      const d = new Date(hoje); d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10); idx[key] = base.length;
-      base.push({ label: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`, google: 0, meta: 0, teste: 0, outros: 0, direto: 0 });
-    }
+    for (const d of janelaDias) { idx[d.key] = base.length; base.push({ label: d.label, google: 0, meta: 0, teste: 0, outros: 0, direto: 0 }); }
     for (const p of pedidos) {
       const k = diaKey(p.ocorrido_em);
       if (idx[k] == null) continue;
       base[idx[k]][p.primeiro_toque ? canalDe(p.primeiro_toque.source) : "direto"] += 1;
     }
     return base;
-  }, [pedidos, janela]);
+  }, [pedidos, janelaDias]);
   const canaisPedidos = (Object.keys(CANAIS) as CanalKey[]).filter((k) => pedidosSerie.some((d) => d[k] > 0));
 
   // Pistas: de onde vêm os "diretos" (toques orgânicos/referral — tag v3)
@@ -331,7 +388,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, periodo }: {
         {/* Toques por dia (empilhado por canal) */}
         <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
           <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-neutral-700">Toques por dia · últimos {janela} dias</h3>
+            <h3 className="text-sm font-semibold text-neutral-700">Toques por dia · {janelaDias.length} dia(s)</h3>
             <Legenda canais={canaisPresentes} />
           </div>
           <div style={{ height: 220 }}>
