@@ -26,11 +26,13 @@ type Pedido = {
   primeiro_toque: Snapshot;
   ultimo_toque: Snapshot;
 };
-type Cliente = { cliente_id: number; email: string; cnpj: string | null; nome: string | null };
+type Cliente = { cliente_id: number; email: string; cnpj: string | null; nome: string | null; cpf?: string | null; telefone?: string | null; plataforma_id?: string | null };
 type Gasto = { dia: string; canal: string; campaign_id: string | null; campaign_name: string | null; ad_id: string | null; ad_name: string | null; gasto: number; plataforma_compras: number | null; plataforma_receita: number | null };
 
 // toque de ANÚNCIO (pago) vs orgânico/direto (pistas — não levam crédito pago)
 const isAd = (t: Toque) => (t.tipo ?? "ad_click") === "ad_click";
+
+type CampRow = { key: string; nome: string; gasto: number; pCompras: number; pReceita: number; aCompras: number; aReceita: number };
 type Toque = {
   id: number; vid: string; ocorrido_em: string; tipo: string | null;
   source: string | null; medium: string | null; campaign: string | null;
@@ -106,7 +108,7 @@ export function AtribuicaoTab() {
       supabase.from("atr_pedidos")
         .select("pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque")
         .order("ocorrido_em", { ascending: false }).limit(2000),
-      supabase.from("atr_clientes").select("cliente_id, email, cnpj, nome").limit(3000),
+      supabase.from("atr_clientes").select("cliente_id, email, cnpj, cpf, nome, telefone, plataforma_id").limit(3000),
       supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, ad_id, ad_name, gasto, plataforma_compras, plataforma_receita").limit(8000),
     ]);
     setToques((tq as any) ?? []);
@@ -264,31 +266,34 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: 
     return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8);
   }, [toques]);
 
-  // Campanhas: o que a PLATAFORMA reporta × o que a ATRIBUIÇÃO já enxerga
-  const campanhas = useMemo(() => {
-    const m: Record<string, { nome: string; gasto: number; pCompras: number; pReceita: number }> = {};
+  // Campanhas POR CANAL: o que a PLATAFORMA reporta × o que a ATRIBUIÇÃO já enxerga
+  const campanhasPorCanal = useMemo(() => {
+    const grupos: Record<"meta" | "google", Record<string, CampRow>> = { meta: {}, google: {} };
     for (const g of gastos) {
+      const canal: "meta" | "google" = g.canal === "google" ? "google" : "meta";
       const key = g.campaign_id || g.campaign_name || "?";
-      const r = (m[key] ??= { nome: g.campaign_name || key, gasto: 0, pCompras: 0, pReceita: 0 });
+      const r = (grupos[canal][key] ??= { key, nome: g.campaign_name || key, gasto: 0, pCompras: 0, pReceita: 0, aCompras: 0, aReceita: 0 });
       r.gasto += Number(g.gasto) || 0;
       r.pCompras += Number(g.plataforma_compras) || 0;
       r.pReceita += Number(g.plataforma_receita) || 0;
+      if (g.campaign_name) r.nome = g.campaign_name;
     }
-    const nomeIdx: Record<string, string> = {};
-    for (const key of Object.keys(m)) nomeIdx[m[key].nome.trim().toLowerCase()] = key;
-    const atrib: Record<string, { compras: number; receita: number }> = {};
+    const idx: Record<"meta" | "google", Record<string, string>> = { meta: {}, google: {} };
+    (["meta", "google"] as const).forEach((c) => {
+      for (const k of Object.keys(grupos[c])) idx[c][grupos[c][k].nome.trim().toLowerCase()] = k;
+    });
     for (const p of pedidos) {
       const s = modelo === "primeiro" ? p.primeiro_toque : p.ultimo_toque;
       if (!s) continue;
-      const key = (s.campaign_id && m[s.campaign_id]) ? s.campaign_id : nomeIdx[(s.campaign || "").trim().toLowerCase()];
+      const canal = canalDe(s.source);
+      if (canal !== "meta" && canal !== "google") continue;
+      const g = grupos[canal];
+      const key = (s.campaign_id && g[s.campaign_id]) ? s.campaign_id : idx[canal][(s.campaign || "").trim().toLowerCase()];
       if (!key) continue;
-      const a = (atrib[key] ??= { compras: 0, receita: 0 });
-      a.compras += 1; a.receita += Number(p.valor) || 0;
+      g[key].aCompras += 1; g[key].aReceita += Number(p.valor) || 0;
     }
-    return Object.entries(m)
-      .map(([key, r]) => ({ key, ...r, aCompras: atrib[key]?.compras ?? 0, aReceita: atrib[key]?.receita ?? 0 }))
-      .filter((c) => c.gasto > 0)
-      .sort((a, b) => b.gasto - a.gasto).slice(0, 12);
+    const lista = (c: "meta" | "google") => Object.values(grupos[c]).filter((r) => r.gasto > 0).sort((a, b) => b.gasto - a.gasto).slice(0, 12);
+    return { meta: lista("meta"), google: lista("google") };
   }, [gastos, pedidos, modelo]);
 
   return (
@@ -413,48 +418,14 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques }: { toques: 
         </div>
       </div>
 
-      {/* Campanhas: plataforma × atribuição */}
-      <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden mt-4">
-        <div className="px-4 py-3 border-b border-neutral-200 flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-neutral-700">Campanhas — plataforma × atribuição</span>
-          <span className="text-xs text-neutral-400">· o que o gerenciador reporta vs o que a atribuição já enxerga (modelo: {modelo === "primeiro" ? "1º toque" : "último toque"})</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
-                <th className="px-4 py-2">Campanha</th>
-                <th className="px-2 py-2 text-right">Gasto</th>
-                <th className="px-2 py-2 text-right" title="Compras que o gerenciador atribui (janela da plataforma)">Compras (plat.)</th>
-                <th className="px-2 py-2 text-right">Receita (plat.)</th>
-                <th className="px-2 py-2 text-right" title="Pedidos que NOSSA atribuição ligou a esta campanha">Compras (atrib.)</th>
-                <th className="px-2 py-2 text-right">Receita (atrib.)</th>
-                <th className="px-2 py-2 text-right" title="Compras da atribuição ÷ compras da plataforma">Cobertura</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-50">
-              {campanhas.map((c) => {
-                const cob = c.pCompras > 0 ? (c.aCompras / c.pCompras) * 100 : null;
-                return (
-                  <tr key={c.key} className="hover:bg-neutral-50">
-                    <td className="px-4 py-2.5 text-neutral-800 font-medium max-w-[260px] truncate" title={c.nome}>{c.nome}</td>
-                    <td className="px-2 py-2.5 text-right text-neutral-600 whitespace-nowrap">{brl(c.gasto)}</td>
-                    <td className="px-2 py-2.5 text-right text-neutral-600">{c.pCompras}</td>
-                    <td className="px-2 py-2.5 text-right text-neutral-600 whitespace-nowrap">{brl(c.pReceita)}</td>
-                    <td className="px-2 py-2.5 text-right font-semibold text-indigo-700">{c.aCompras}</td>
-                    <td className="px-2 py-2.5 text-right font-semibold text-indigo-700 whitespace-nowrap">{brl(c.aReceita)}</td>
-                    <td className={`px-2 py-2.5 text-right font-semibold ${cob == null ? "text-neutral-300" : cob >= 50 ? "text-emerald-600" : "text-amber-600"}`}>{cob == null ? "—" : `${cob.toFixed(0)}%`}</td>
-                  </tr>
-                );
-              })}
-              {campanhas.length === 0 && <tr><td colSpan={7} className="px-4 py-4 text-neutral-400">Sem gasto sincronizado ainda — rodar o sync do Meta.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-        <p className="px-4 py-2.5 text-[11px] text-neutral-400 border-t border-neutral-100">
-          Plataforma atribui pela janela dela (ex.: 7 dias pós-clique, inclui modelagem) — a cobertura nunca será 100% e cresce com o tempo. Gasto: Meta (por anúncio) + Google (por campanha; dados atrasam ~1 dia). A atribuição do lado Google engata quando o sufixo de URL estiver ativo.
-        </p>
-      </div>
+      {/* Campanhas: plataforma × atribuição — um bloco por canal */}
+      <TabelaCampanhas titulo="Meta Ads" cor={CANAIS.meta.cor} rows={campanhasPorCanal.meta} modelo={modelo}
+        rodape="Gasto por anúncio (agregado por campanha). A plataforma atribui pela janela dela (7d clique, com modelagem)." />
+      <TabelaCampanhas titulo="Google Ads" cor={CANAIS.google.cor} rows={campanhasPorCanal.google} modelo={modelo}
+        rodape="Gasto por campanha; dados do Google atrasam ~1 dia. A atribuição engata quando o sufixo de URL estiver ativo." />
+      <p className="text-[11px] text-neutral-400 mt-2">
+        Cobertura = compras da atribuição ÷ compras da plataforma — nunca será 100% (janelas diferentes) e cresce com o tempo.
+      </p>
     </>
   );
 }
@@ -1016,6 +987,74 @@ function Kpi({ icone, rotulo, valor, destaque }: { key?: React.Key; icone: React
   );
 }
 
+function MiniKpi({ rotulo, valor }: { key?: React.Key; rotulo: string; valor: string }) {
+  return (
+    <div className="rounded-xl border border-neutral-200 p-2.5">
+      <div className="text-[10px] uppercase tracking-wide text-neutral-400 font-semibold">{rotulo}</div>
+      <div className="text-sm font-semibold text-neutral-800 mt-0.5">{valor}</div>
+    </div>
+  );
+}
+
+function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Key; titulo: string; cor: string; rows: CampRow[]; modelo: Modelo; rodape?: string }) {
+  const tot = rows.reduce((s, r) => ({ gasto: s.gasto + r.gasto, pC: s.pC + r.pCompras, pR: s.pR + r.pReceita, aC: s.aC + r.aCompras, aR: s.aR + r.aReceita }), { gasto: 0, pC: 0, pR: 0, aC: 0, aR: 0 });
+  const cobTot = tot.pC > 0 ? (tot.aC / tot.pC) * 100 : null;
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden mt-4">
+      <div className="px-4 py-3 border-b border-neutral-200 flex items-center gap-2 flex-wrap">
+        <span className="w-2.5 h-2.5 rounded-full" style={{ background: cor }} />
+        <span className="text-sm font-semibold text-neutral-700">{titulo} — plataforma × atribuição</span>
+        <span className="text-xs text-neutral-400">· modelo: {modelo === "primeiro" ? "1º toque" : "último toque"}</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-4 text-xs text-neutral-400">Sem gasto sincronizado deste canal ainda.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
+                <th className="px-4 py-2">Campanha</th>
+                <th className="px-2 py-2 text-right">Gasto</th>
+                <th className="px-2 py-2 text-right" title="Compras que o gerenciador atribui (janela da plataforma)">Compras (plat.)</th>
+                <th className="px-2 py-2 text-right">Receita (plat.)</th>
+                <th className="px-2 py-2 text-right" title="Pedidos que NOSSA atribuição ligou a esta campanha">Compras (atrib.)</th>
+                <th className="px-2 py-2 text-right">Receita (atrib.)</th>
+                <th className="px-2 py-2 text-right" title="Compras da atribuição ÷ compras da plataforma">Cobertura</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-50">
+              {rows.map((c) => {
+                const cob = c.pCompras > 0 ? (c.aCompras / c.pCompras) * 100 : null;
+                return (
+                  <tr key={c.key} className="hover:bg-neutral-50">
+                    <td className="px-4 py-2.5 text-neutral-800 font-medium max-w-[260px] truncate" title={c.nome}>{c.nome}</td>
+                    <td className="px-2 py-2.5 text-right text-neutral-600 whitespace-nowrap">{brl(c.gasto)}</td>
+                    <td className="px-2 py-2.5 text-right text-neutral-600">{c.pCompras}</td>
+                    <td className="px-2 py-2.5 text-right text-neutral-600 whitespace-nowrap">{brl(c.pReceita)}</td>
+                    <td className="px-2 py-2.5 text-right font-semibold text-indigo-700">{c.aCompras}</td>
+                    <td className="px-2 py-2.5 text-right font-semibold text-indigo-700 whitespace-nowrap">{brl(c.aReceita)}</td>
+                    <td className={`px-2 py-2.5 text-right font-semibold ${cob == null ? "text-neutral-300" : cob >= 50 ? "text-emerald-600" : "text-amber-600"}`}>{cob == null ? "—" : `${cob.toFixed(0)}%`}</td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-neutral-50 font-semibold text-neutral-800 border-t border-neutral-200">
+                <td className="px-4 py-2.5">Total</td>
+                <td className="px-2 py-2.5 text-right whitespace-nowrap">{brl(tot.gasto)}</td>
+                <td className="px-2 py-2.5 text-right">{tot.pC}</td>
+                <td className="px-2 py-2.5 text-right whitespace-nowrap">{brl(tot.pR)}</td>
+                <td className="px-2 py-2.5 text-right text-indigo-700">{tot.aC}</td>
+                <td className="px-2 py-2.5 text-right text-indigo-700 whitespace-nowrap">{brl(tot.aR)}</td>
+                <td className={`px-2 py-2.5 text-right ${cobTot == null ? "text-neutral-300" : cobTot >= 50 ? "text-emerald-600" : "text-amber-600"}`}>{cobTot == null ? "—" : `${cobTot.toFixed(0)}%`}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rodape && <p className="px-4 py-2.5 text-[11px] text-neutral-400 border-t border-neutral-100">{rodape}</p>}
+    </div>
+  );
+}
+
 function Legenda({ canais }: { canais: CanalKey[] }) {
   return (
     <div className="flex items-center gap-3 flex-wrap">
@@ -1040,7 +1079,7 @@ function VidDrawer({ vid, onClose }: { vid: string; onClose: () => void }) {
       setPronto(false); setCliente(null);
       const { data: ident } = await supabase.from("atr_identidades").select("cliente_id").eq("vid", vid).maybeSingle();
       if ((ident as any)?.cliente_id) {
-        const { data: c } = await supabase.from("atr_clientes").select("cliente_id, email, cnpj, nome").eq("cliente_id", (ident as any).cliente_id).maybeSingle();
+        const { data: c } = await supabase.from("atr_clientes").select("cliente_id, email, cnpj, cpf, nome, telefone, plataforma_id").eq("cliente_id", (ident as any).cliente_id).maybeSingle();
         if (c) { setCliente(c as any); setPronto(true); return; }
       }
       const [t, p] = await Promise.all([
@@ -1153,6 +1192,9 @@ function JornadaDrawer({ cliente, onClose }: { cliente: Cliente; onClose: () => 
     return evs.sort((a, b) => a.quando.localeCompare(b.quando));
   }, [toques, pedidos]);
 
+  const receitaCliente = pedidos.reduce((s, p) => s + (Number(p.valor) || 0), 0);
+  const origemPaga = toques.find((t) => isAd(t)) ?? toques[0] ?? null;
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40 animate-in fade-in" onClick={onClose} />
@@ -1161,13 +1203,55 @@ function JornadaDrawer({ cliente, onClose }: { cliente: Cliente; onClose: () => 
           <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0"><Route className="w-5 h-5" /></div>
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-semibold text-neutral-800 truncate">{cliente.nome || cliente.email}</h3>
-            <p className="text-xs text-neutral-500 truncate">{cliente.email}{cliente.cnpj ? ` · CNPJ ${cliente.cnpj}` : ""}</p>
+            <p className="text-xs text-neutral-500 truncate">{cliente.email}{cliente.telefone ? ` · ${cliente.telefone}` : ""}</p>
+            <p className="text-[11px] text-neutral-400 truncate">
+              {cliente.cnpj ? `CNPJ ${cliente.cnpj}` : cliente.cpf ? `CPF ${cliente.cpf}` : "sem documento"}
+              {cliente.plataforma_id ? ` · id ${cliente.plataforma_id}` : ""}
+            </p>
           </div>
           <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           {loading && <p className="text-xs text-neutral-400">Carregando jornada...</p>}
           {!loading && eventos.length === 0 && <p className="text-sm text-neutral-400">Sem eventos registrados pra este cliente ainda.</p>}
+
+          {/* Perfil do cliente */}
+          {!loading && (
+            <div className="mb-4 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <MiniKpi rotulo="LTV (receita)" valor={brl(receitaCliente)} />
+                <MiniKpi rotulo="Pedidos" valor={String(pedidos.length)} />
+                <MiniKpi rotulo="Ticket médio" valor={pedidos.length ? brl(receitaCliente / pedidos.length) : "—"} />
+                <MiniKpi rotulo="Toques" valor={String(toques.length)} />
+              </div>
+              {origemPaga && (
+                <div className="rounded-xl border border-neutral-200 p-3 text-xs">
+                  <div className="text-[10px] uppercase tracking-wide text-neutral-400 font-semibold mb-1">Origem (1º toque)</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CANAIS[canalDe(origemPaga.source, origemPaga.gclid, origemPaga.fbclid)].cor }} />
+                    <span className="font-medium text-neutral-800 truncate">{origemPaga.term || origemPaga.campaign || origemPaga.source || "—"}</span>
+                  </div>
+                  <div className="text-neutral-400 mt-0.5 truncate">{origemPaga.campaign ? `${origemPaga.campaign} · ` : ""}{dtHora(origemPaga.ocorrido_em)}</div>
+                </div>
+              )}
+              {pedidos.length > 0 && (
+                <div className="rounded-xl border border-neutral-200 divide-y divide-neutral-100">
+                  {pedidos.map((p) => (
+                    <div key={p.pedido_id} className="px-3 py-2 flex items-center gap-2 text-xs">
+                      <ShoppingCart className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      <div className="flex-1 min-w-0 truncate">
+                        <span className="font-medium text-neutral-800">#{p.pedido_id}</span>
+                        <span className="text-neutral-400 ml-1.5">{p.produto || ""}</span>
+                      </div>
+                      <span className="text-neutral-400 whitespace-nowrap">{dt(p.ocorrido_em)}</span>
+                      <span className="font-semibold text-neutral-800 whitespace-nowrap">{p.valor != null ? brl(Number(p.valor)) : "—"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {eventos.length > 0 && <div className="text-[10px] uppercase tracking-wide text-neutral-400 font-semibold pt-1">Jornada</div>}
+            </div>
+          )}
           <div className="relative pl-5">
             <div className="absolute left-[7px] top-1 bottom-1 w-px bg-neutral-200" />
             {eventos.map((ev, i) => (
