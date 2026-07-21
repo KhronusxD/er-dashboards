@@ -246,40 +246,55 @@ documentado) e anotar:
 
 ## 6. Tag 3 — "ATRIB · identify" (Custom HTML) — DESTRAVA O META
 
-**Por quê:** o clique do Meta (mobile/in-app) quase nunca compartilha cookie
-com a compra → 0% de atribuição. O único jeito de costurar é a **identidade
-determinística (e-mail do usuário logado)**: assim que a pessoa loga, casamos
-o cookie dela à conta; quando ela compra depois (outro cookie/aparelho), casa
-por e-mail. Isso recupera boa parte do Meta sem depender de dev.
+**Por quê:** o clique do Meta (83% mobile/in-app) quase nunca compartilha cookie
+com a compra → 0% de atribuição. A solução é **identidade determinística**, e o
+dataLayer real do AtualCard (confirmado 21/07) dá DUAS portas:
 
-**Acionador:** *DOM Ready* → Todas as páginas (o dataLayer do usuário já
-carregou nesse ponto).
+- **Login "fresco"** (passa pela tela de login) → dispara o evento `login` com
+  `user_data.email` **+** `user_id`. Costura por e-mail.
+- **Já logado** (sessão salva, só entra) → o dataLayer **não** traz e-mail, só
+  `userId` (número, camelCase). Costura por `user_id`.
 
-**Variáveis de dataLayer** a criar (⚠️ CONFIRMAR o caminho no Preview logado —
-ver §6b). Palpite inicial (mesmo do purchase):
+O 2º caso é o mais valioso pro Meta (quem volta logado pra comprar). E funciona
+de imediato: **os 1154 clientes já têm `plataforma_id` gravado** (vem da compra),
+então casar o cookie novo pelo `user_id` acha o cliente na hora.
 
-| Variável GTM | Caminho provável |
-|---|---|
-| `DL · email_logado` | `user_data.email` |
-| `DL · nome_logado` (opc.) | `user_data.address.first_name` |
-| `DL · telefone_logado` (opc.) | `user_data.phone_number` |
-| `DL · user_id` | `user_id` (já existe da Tag 2) |
+> **Banco:** a função `track` foi ampliada (21/07) — `identify` agora aceita
+> **e-mail OU `plataforma_id`**. Sem e-mail, ela vincula o vid ao cliente que já
+> tiver aquele `plataforma_id`; se ainda não conhecer esse usuário, responde
+> `pendente:true` (não cria cliente vazio). ✅ aplicado em produção.
+
+**Acionadores (os DOIS na mesma tag):**
+1. **Evento personalizado** `login` — pega o login fresco (e-mail).
+2. **DOM disponível** (*DOM Ready*) → Todas as páginas — pega o já-logado (userId
+   em toda página). A tag só dispara de verdade **1x por sessão** (dedup via
+   sessionStorage), então os dois juntos não geram flood.
+
+**Variáveis de dataLayer** (tipo *Variável da camada de dados*, versão 2):
+
+| Variável GTM | Nome no dataLayer | Observação |
+|---|---|---|
+| `DL · email` | `user_data.email` | JÁ EXISTE (da Tag de compra). Reusar. |
+| `DL · user_id` | `user_id` | JÁ EXISTE. Presente no evento `login`. |
+| `DL · userId` | `userId` | **CRIAR** — é o do usuário já-logado (camelCase). |
 
 ```html
 <script>
 (function () {
   if (location.hostname !== 'www.atualcard.com.br') return;
   function getCookie(n){var m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():''}
-  var email = ({{DL · email_logado}} || '').toString().trim().toLowerCase();
-  if (!email || email.indexOf('@') === -1) return;         // sem login → não faz nada
-  // dispara no máx. 1x por sessão por e-mail (evita flood)
-  try { if (sessionStorage.getItem('nap_id') === email) return; sessionStorage.setItem('nap_id', email); } catch (e) {}
-  var vid = getCookie('nap_vid'); if (!vid) return;         // precisa do cookie do visitante
+  var email = ({{DL · email}} || '').toString().trim().toLowerCase();
+  if (email.indexOf('@') === -1) email = '';                 // sem e-mail válido → ignora e-mail
+  var uid = ({{DL · user_id}} || {{DL · userId}} || '').toString().trim();  // login OU já-logado
+  if (!email && !uid) return;                                // nada pra identificar
+  var vid = getCookie('nap_vid'); if (!vid) return;          // precisa do cookie do visitante
+  var chave = email || ('uid:' + uid);
+  // dispara no máx. 1x por sessão por identidade (evita flood do DOM Ready)
+  try { if (sessionStorage.getItem('nap_id') === chave) return; sessionStorage.setItem('nap_id', chave); } catch (e) {}
   var payload = {
-    token: '{{ATRIB · token}}', type: 'identify', vid: vid, email: email,
-    nome: {{DL · nome_logado}} || null,
-    telefone: {{DL · telefone_logado}} || null,
-    plataforma_id: {{DL · user_id}} ? String({{DL · user_id}}) : null
+    token: '{{ATRIB · token}}', type: 'identify', vid: vid,
+    email: email || null,
+    plataforma_id: uid || null
   };
   try {
     fetch('{{ATRIB · url}}', {
@@ -292,19 +307,18 @@ ver §6b). Palpite inicial (mesmo do purchase):
 </script>
 ```
 
-> Não precisa mexer no banco — a função `track` já aceita `identify`
-> (idempotente por e-mail). Se o e-mail não estiver no dataLayer, a tag
-> simplesmente não dispara nada (seguro).
+> ⚠️ As **três** variáveis (`DL · email`, `DL · user_id`, `DL · userId`) precisam
+> existir no contêiner, senão o GTM deixa o literal `{{...}}` no código e quebra a
+> tag. As duas primeiras já existem; crie só `DL · userId`.
 
-## 6b. Confirmar o caminho do e-mail logado (2 min)
+## 6b. Caminhos confirmados no dataLayer real (21/07)
 
-No **GTM Preview**, **logado na conta**, abra uma página comum (home, produto).
-Na aba *Variables* / *Data Layer* do Tag Assistant, procure o e-mail do usuário.
-- Se estiver em `user_data.email` → nada a fazer, o palpite acima está certo.
-- Se estiver noutro caminho (ex.: `customer.email`, `dataLayer.user.email`) →
-  ajuste o campo da variável `DL · email_logado` pra esse caminho.
-- Se **não aparecer em nenhum** → o site não expõe o e-mail logado no dataLayer;
-  aí a costura do Meta depende da versão **backend** (§ SPEC-BACKEND.md).
+- **Login fresco** (evento `login`): `user_data.email` = e-mail, `user_id` = ID.
+- **Já logado** (qualquer página): só `userId` (número). Sem e-mail.
+- **Compra** (evento `purchase`): `user_data.email` + `user_id` (a compra já
+  identifica sozinha — ver §3/§5).
+
+Nada a adivinhar aqui; só criar a variável `DL · userId` e publicar.
 
 ## 7. Teste de aceitação (antes de publicar o contêiner)
 

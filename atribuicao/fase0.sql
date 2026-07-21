@@ -153,19 +153,36 @@ BEGIN
     RETURN jsonb_build_object('ok', true, 'evento', 'touch');
 
   -- ===== IDENTIFY: costura vid → cliente (cadastro/login) =====
+  -- Duas portas de entrada:
+  --   (a) COM e-mail  -> upsert do cliente por e-mail (login "fresco"/cadastro).
+  --   (b) SEM e-mail, COM plataforma_id -> costura por ID do usuário da loja
+  --       (usuário JÁ logado: o dataLayer só expõe user_id, sem e-mail). Só
+  --       vincula se JÁ existir um cliente com esse plataforma_id (não cria
+  --       cliente vazio). É assim que pegamos quem volta logado (caso Meta).
   ELSIF v_type = 'identify' THEN
-    IF v_email = '' THEN RAISE EXCEPTION 'email requerido'; END IF;
-    INSERT INTO atr_clientes(email, cnpj, cpf, nome, telefone, plataforma_id)
-    VALUES (v_email, payload->>'cnpj', payload->>'cpf', payload->>'nome',
-            payload->>'telefone', payload->>'plataforma_id')
-    ON CONFLICT (email) DO UPDATE SET
-      cnpj          = coalesce(EXCLUDED.cnpj, atr_clientes.cnpj),
-      cpf           = coalesce(EXCLUDED.cpf,  atr_clientes.cpf),
-      nome          = coalesce(EXCLUDED.nome, atr_clientes.nome),
-      telefone      = coalesce(EXCLUDED.telefone, atr_clientes.telefone),
-      plataforma_id = coalesce(EXCLUDED.plataforma_id, atr_clientes.plataforma_id)
-    RETURNING cliente_id INTO v_cliente;
-    IF v_vid IS NOT NULL THEN
+    IF v_email <> '' THEN
+      INSERT INTO atr_clientes(email, cnpj, cpf, nome, telefone, plataforma_id)
+      VALUES (v_email, payload->>'cnpj', payload->>'cpf', payload->>'nome',
+              payload->>'telefone', payload->>'plataforma_id')
+      ON CONFLICT (email) DO UPDATE SET
+        cnpj          = coalesce(EXCLUDED.cnpj, atr_clientes.cnpj),
+        cpf           = coalesce(EXCLUDED.cpf,  atr_clientes.cpf),
+        nome          = coalesce(EXCLUDED.nome, atr_clientes.nome),
+        telefone      = coalesce(EXCLUDED.telefone, atr_clientes.telefone),
+        plataforma_id = coalesce(EXCLUDED.plataforma_id, atr_clientes.plataforma_id)
+      RETURNING cliente_id INTO v_cliente;
+    ELSIF NULLIF(payload->>'plataforma_id','') IS NOT NULL THEN
+      SELECT cliente_id INTO v_cliente
+      FROM atr_clientes WHERE plataforma_id = payload->>'plataforma_id'
+      ORDER BY cliente_id LIMIT 1;
+      IF v_cliente IS NULL THEN
+        -- ainda não conhecemos esse usuário por e-mail; nada a costurar (por ora)
+        RETURN jsonb_build_object('ok', true, 'evento', 'identify', 'pendente', true);
+      END IF;
+    ELSE
+      RAISE EXCEPTION 'email ou plataforma_id requerido';
+    END IF;
+    IF v_vid IS NOT NULL AND v_cliente IS NOT NULL THEN
       INSERT INTO atr_visitantes(vid) VALUES (v_vid) ON CONFLICT DO NOTHING;
       INSERT INTO atr_identidades(vid, cliente_id) VALUES (v_vid, v_cliente)
       ON CONFLICT (vid) DO UPDATE SET cliente_id = EXCLUDED.cliente_id, vinculado_em = now();
