@@ -244,12 +244,67 @@ documentado) e anotar:
 3. *(Bônus p/ Fase 2 light)*: existe push no **login/cadastro** com o e-mail?
    Se sim, dá pra fazer o `identify` via GTM também (mesma tag, `type:'identify'`).
 
-## 6. Tag 3 (opcional) — "ATRIB · identify" via GTM
+## 6. Tag 3 — "ATRIB · identify" (Custom HTML) — DESTRAVA O META
 
-Se o dataLayer expõe o e-mail no login/cadastro (§5.3), duplicar a Tag 2
-trocando o payload por `{ type:'identify', vid, email, cnpj?, nome? }` com o
-acionador do evento de login. Isso adianta a costura sem backend. A versão
-**backend** (Fase 2) continua recomendada por ser imune a bloqueio.
+**Por quê:** o clique do Meta (mobile/in-app) quase nunca compartilha cookie
+com a compra → 0% de atribuição. O único jeito de costurar é a **identidade
+determinística (e-mail do usuário logado)**: assim que a pessoa loga, casamos
+o cookie dela à conta; quando ela compra depois (outro cookie/aparelho), casa
+por e-mail. Isso recupera boa parte do Meta sem depender de dev.
+
+**Acionador:** *DOM Ready* → Todas as páginas (o dataLayer do usuário já
+carregou nesse ponto).
+
+**Variáveis de dataLayer** a criar (⚠️ CONFIRMAR o caminho no Preview logado —
+ver §6b). Palpite inicial (mesmo do purchase):
+
+| Variável GTM | Caminho provável |
+|---|---|
+| `DL · email_logado` | `user_data.email` |
+| `DL · nome_logado` (opc.) | `user_data.address.first_name` |
+| `DL · telefone_logado` (opc.) | `user_data.phone_number` |
+| `DL · user_id` | `user_id` (já existe da Tag 2) |
+
+```html
+<script>
+(function () {
+  if (location.hostname !== 'www.atualcard.com.br') return;
+  function getCookie(n){var m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():''}
+  var email = ({{DL · email_logado}} || '').toString().trim().toLowerCase();
+  if (!email || email.indexOf('@') === -1) return;         // sem login → não faz nada
+  // dispara no máx. 1x por sessão por e-mail (evita flood)
+  try { if (sessionStorage.getItem('nap_id') === email) return; sessionStorage.setItem('nap_id', email); } catch (e) {}
+  var vid = getCookie('nap_vid'); if (!vid) return;         // precisa do cookie do visitante
+  var payload = {
+    token: '{{ATRIB · token}}', type: 'identify', vid: vid, email: email,
+    nome: {{DL · nome_logado}} || null,
+    telefone: {{DL · telefone_logado}} || null,
+    plataforma_id: {{DL · user_id}} ? String({{DL · user_id}}) : null
+  };
+  try {
+    fetch('{{ATRIB · url}}', {
+      method: 'POST',
+      headers: { 'apikey': '{{ATRIB · anon}}', 'Content-Profile': 'napan', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload: payload }), keepalive: true
+    });
+  } catch (e) {}
+})();
+</script>
+```
+
+> Não precisa mexer no banco — a função `track` já aceita `identify`
+> (idempotente por e-mail). Se o e-mail não estiver no dataLayer, a tag
+> simplesmente não dispara nada (seguro).
+
+## 6b. Confirmar o caminho do e-mail logado (2 min)
+
+No **GTM Preview**, **logado na conta**, abra uma página comum (home, produto).
+Na aba *Variables* / *Data Layer* do Tag Assistant, procure o e-mail do usuário.
+- Se estiver em `user_data.email` → nada a fazer, o palpite acima está certo.
+- Se estiver noutro caminho (ex.: `customer.email`, `dataLayer.user.email`) →
+  ajuste o campo da variável `DL · email_logado` pra esse caminho.
+- Se **não aparecer em nenhum** → o site não expõe o e-mail logado no dataLayer;
+  aí a costura do Meta depende da versão **backend** (§ SPEC-BACKEND.md).
 
 ## 7. Teste de aceitação (antes de publicar o contêiner)
 
