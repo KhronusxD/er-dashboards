@@ -161,15 +161,27 @@ export function AtribuicaoTab() {
     // os COMBOS agregados (RPC atr_toques_agg → poucos milhares, histórico inteiro)
     // e um feed cru recente (só o "Feed de toques" precisa de eventos individuais).
     const cols = "id, vid, ocorrido_em, tipo, source, medium, campaign, content, term, campaign_id, adset_id, ad_id, fbclid, gclid, landing_url, device";
-    const [aggRes, feedRes, { count }, { data: peds }, { data: clis }, { data: gst }] = await Promise.all([
+    // PostgREST corta em 1000 linhas/consulta (o .limit não sobe isso) → paginar
+    // de verdade, senão pedidos/clientes/gastos vêm truncados (só os ~1000 recentes).
+    const paginar = async (tabela: string, colsSel: string, ordena?: string): Promise<any[]> => {
+      let tudo: any[] = [];
+      for (let i = 0; i < 60; i++) {                 // teto de segurança: 60k linhas
+        let q = supabase.from(tabela).select(colsSel).range(i * 1000, i * 1000 + 999);
+        if (ordena) q = q.order(ordena, { ascending: false });
+        const { data } = await q;
+        const chunk = (data as any[]) ?? [];
+        tudo = tudo.concat(chunk);
+        if (chunk.length < 1000) break;
+      }
+      return tudo;
+    };
+    const [aggRes, feedRes, { count }, peds, clis, gst] = await Promise.all([
       supabase.rpc("atr_toques_agg"),
       supabase.from("atr_toques").select(cols).order("ocorrido_em", { ascending: false }).limit(600),
       supabase.from("atr_toques").select("id", { count: "exact", head: true }),
-      supabase.from("atr_pedidos")
-        .select("pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque")
-        .order("ocorrido_em", { ascending: false }).limit(2000),
-      supabase.from("atr_clientes").select("cliente_id, email, cnpj, cpf, nome, telefone, plataforma_id").limit(3000),
-      supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, gasto, cliques, plataforma_compras, plataforma_receita").limit(8000),
+      paginar("atr_pedidos", "pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque", "ocorrido_em"),
+      paginar("atr_clientes", "cliente_id, email, cnpj, cpf, nome, telefone, plataforma_id"),
+      paginar("atr_gastos", "dia, canal, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, gasto, cliques, plataforma_compras, plataforma_receita"),
     ]);
     // combos → objetos tipo Toque (contagem em n; data ancorada no meio-dia do dia)
     const combos: Toque[] = (((aggRes as any).data as any[]) ?? []).map((r, i) => ({
