@@ -7,7 +7,7 @@ import {
 import {
   Target, Users, Receipt, Clock, X, ChevronRight, LayoutDashboard,
   MousePointerClick, ShoppingCart, UserCheck, Route, Radio, Sparkles, Percent,
-  RefreshCw,
+  RefreshCw, Wallet, Award, TrendingUp,
 } from "lucide-react";
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
@@ -403,25 +403,20 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
   const pctOrigem = nPedidos ? Math.round((comOrigem / nPedidos) * 100) : 0;
   const tempoMedio: number | null = totais.tempo_medio_dias == null ? null : Number(totais.tempo_medio_dias);
 
-  // Série diária (14 dias) empilhada por canal
-  const serieDiaria = useMemo(() => {
-    const base = janelaDias.map((d) => ({ label: d.label, dia: d.key, google: 0, meta: 0, teste: 0, outros: 0, direto: 0 }));
-    const idx = Object.fromEntries(base.map((b, i) => [b.dia, i]));
-    for (const t of toques) {
-      if (!isAd(t)) continue;                       // gráfico = toques de anúncio
-      const k = diaKey(t.ocorrido_em);
-      if (idx[k] == null) continue;
-      (base[idx[k]] as any)[canalDe(t.source, t.gclid, t.fbclid)] += (t.n ?? 1);
+  // Gasto por canal e por anúncio + nome do anúncio (do sync de gastos)
+  const gastoInfo = useMemo(() => {
+    const nomeAd: Record<string, string> = {}, gastoPorAd: Record<string, number> = {};
+    const gastoCanal: Record<"meta" | "google", number> = { meta: 0, google: 0 };
+    for (const g of gastos) {
+      const c: "meta" | "google" = g.canal === "google" ? "google" : "meta";
+      gastoCanal[c] += Number(g.gasto) || 0;
+      if (g.ad_id) {
+        gastoPorAd[g.ad_id] = (gastoPorAd[g.ad_id] || 0) + (Number(g.gasto) || 0);
+        if (g.ad_name) nomeAd[g.ad_id] = g.ad_name;
+      }
     }
-    return base;
-  }, [toques, janelaDias]);
-
-  // Donut por canal (toques) + receita por canal (pedidos, modelo escolhido)
-  const porCanalToques = useMemo(() => {
-    const m: Record<CanalKey, number> = { google: 0, meta: 0, teste: 0, outros: 0, direto: 0 };
-    for (const t of toques) { if (isAd(t)) m[canalDe(t.source, t.gclid, t.fbclid)] += (t.n ?? 1); }
-    return (Object.keys(CANAIS) as CanalKey[]).map((k) => ({ k, name: CANAIS[k].label, value: m[k], cor: CANAIS[k].cor })).filter((x) => x.value > 0);
-  }, [toques]);
+    return { nomeAd, gastoPorAd, gastoCanal };
+  }, [gastos]);
 
   const receitaPorCanal = useMemo(() => {
     const m: Record<CanalKey, { receita: number; pedidos: number }> = {
@@ -438,7 +433,17 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
   }, [resumo, modelo]);
   const maxRec = Math.max(1, ...receitaPorCanal.map((r) => r.receita));
 
-  const canaisPresentes = (Object.keys(CANAIS) as CanalKey[]).filter((k) => serieDiaria.some((d) => (d as any)[k] > 0));
+  // ── Conversão: investimento × retorno + ticket + ROAS geral ──
+  const recPagaCanal: Record<"meta" | "google", { receita: number; pedidos: number }> = { meta: { receita: 0, pedidos: 0 }, google: { receita: 0, pedidos: 0 } };
+  for (const r of receitaPorCanal) { if (r.k === "meta" || r.k === "google") recPagaCanal[r.k] = { receita: r.receita, pedidos: r.pedidos }; }
+  const investido = gastoInfo.gastoCanal.meta + gastoInfo.gastoCanal.google;
+  const receitaAtribuida = recPagaCanal.meta.receita + recPagaCanal.google.receita;
+  const roasGeral = investido > 0 ? receitaAtribuida / investido : null;
+  const ticketMedio = nPedidos > 0 ? receita / nPedidos : 0;
+  const canaisPagos = ([["meta"], ["google"]] as const).map(([k]) => ({
+    k, label: CANAIS[k].label, cor: CANAIS[k].cor,
+    gasto: gastoInfo.gastoCanal[k], receita: recPagaCanal[k].receita, pedidos: recPagaCanal[k].pedidos,
+  }));
 
   // Pedidos por dia (14d) — a leitura principal: com origem (por canal) vs sem origem (cinza)
   const pedidosSerie = useMemo(() => {
@@ -454,12 +459,24 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
   }, [resumo, janelaDias]);
   const canaisPedidos = (Object.keys(CANAIS) as CanalKey[]).filter((k) => pedidosSerie.some((d) => d[k] > 0));
 
-  // Pistas: de onde vêm os "diretos" (toques orgânicos/referral — tag v3)
-  const pistas = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const t of toques) { if (isAd(t)) continue; const k = t.source || "(direto, sem referrer)"; m[k] = (m[k] ?? 0) + (t.n ?? 1); }
-    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  }, [toques]);
+  // Top criativos que mais venderam (agregado por anúncio, modelo escolhido)
+  const topCriativos = useMemo(() => {
+    const m: Record<string, { nome: string; canal: CanalKey; receita: number; pedidos: number; adId: string | null }> = {};
+    for (const r of (resumo?.por_criativo ?? [])) {
+      if (r.modelo !== modelo) continue;
+      const canal = r.canal as CanalKey;
+      if (canal !== "meta" && canal !== "google") continue;
+      const adId: string | null = r.ad_id || null;
+      const chave = adId || r.term || r.campaign || "(sem criativo)";
+      const nome = (adId && gastoInfo.nomeAd[adId]) || r.term || r.campaign || "(sem criativo)";
+      const e = (m[chave] ??= { nome, canal, receita: 0, pedidos: 0, adId });
+      e.receita += Number(r.receita) || 0; e.pedidos += Number(r.pedidos) || 0;
+    }
+    return Object.values(m)
+      .map((e) => { const gasto = e.adId ? (gastoInfo.gastoPorAd[e.adId] || 0) : 0; return { ...e, gasto, roas: gasto > 0 ? e.receita / gasto : null }; })
+      .sort((a, b) => b.receita - a.receita)
+      .slice(0, 8);
+  }, [resumo, modelo, gastoInfo]);
 
   // Campanhas POR CANAL: o que a PLATAFORMA reporta × o que a ATRIBUIÇÃO já enxerga
   const campanhasPorCanal = useMemo(() => {
@@ -510,67 +527,89 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
 
   return (
     <>
-      {/* KPIs primários */}
+      {/* KPIs — foco em conversão/dinheiro */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-        <Kpi icone={<MousePointerClick className="w-4 h-4" />} rotulo="Toques" valor={String(totalToques)} />
+        <Kpi icone={<Receipt className="w-4 h-4" />} rotulo="Receita total" valor={brl(receita)} />
+        <Kpi icone={<Wallet className="w-4 h-4" />} rotulo="Investido (ads)" valor={brl(investido)} />
+        <Kpi icone={<TrendingUp className="w-4 h-4" />} rotulo="Retorno (ROAS)"
+          valor={roasGeral == null ? "—" : `${roasGeral.toFixed(1)}x`}
+          destaque={roasGeral == null ? undefined : roasGeral >= 1 ? "cada R$1 → " + brl(roasGeral) : "abaixo de 1x — rastreio cresce"} />
         <Kpi icone={<ShoppingCart className="w-4 h-4" />} rotulo="Pedidos" valor={String(nPedidos)} />
-        <Kpi icone={<Percent className="w-4 h-4" />} rotulo="Pedidos c/ origem" valor={`${pctOrigem}%`} destaque={pctOrigem < 30 ? "baixo — cresce com o tempo" : undefined} />
-        <Kpi icone={<Receipt className="w-4 h-4" />} rotulo="Receita" valor={brl(receita)} />
-        <Kpi icone={<Users className="w-4 h-4" />} rotulo="Clientes" valor={String(clientesUnicos)} />
-        <Kpi icone={<Clock className="w-4 h-4" />} rotulo="Tempo até compra"
-          valor={tempoMedio == null ? "—" : tempoMedio >= 1 ? `${tempoMedio.toFixed(1)}d` : tempoMedio >= 1 / 24 ? `${(tempoMedio * 24).toFixed(1)}h` : `${Math.round(tempoMedio * 1440)}min`} />
+        <Kpi icone={<Target className="w-4 h-4" />} rotulo="Ticket médio" valor={brl(ticketMedio)} />
+        <Kpi icone={<Percent className="w-4 h-4" />} rotulo="Pedidos c/ origem" valor={`${pctOrigem}%`} destaque={pctOrigem < 30 ? "cresce com o tempo" : undefined} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
-        {/* Toques por dia (empilhado por canal) */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-neutral-700">Toques por dia · {janelaDias.length} dia(s)</h3>
-            <Legenda canais={canaisPresentes} />
-          </div>
-          <div style={{ height: 220 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={serieDiaria} barCategoryGap="28%">
-                <CartesianGrid vertical={false} stroke="#f1f2f4" />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} width={26} />
-                <RTooltip contentStyle={{ borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 12 }} cursor={{ fill: "rgba(99,102,241,0.05)" }} />
-                {canaisPresentes.map((k) => (
-                  <Bar key={k} dataKey={k} name={CANAIS[k].label} stackId="a" fill={CANAIS[k].cor} stroke="#ffffff" strokeWidth={1} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+      {/* Investimento × Retorno por canal — a leitura de conversão em dinheiro */}
+      <div className="mt-4">
+        <h3 className="text-sm font-semibold text-neutral-700 mb-2 flex items-center gap-1.5"><Wallet className="w-4 h-4 text-indigo-500" /> Investimento × Retorno por canal</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {canaisPagos.map((c) => {
+            const roas = c.gasto > 0 ? c.receita / c.gasto : null;
+            return (
+              <div key={c.k} className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="w-3 h-3 rounded-full" style={{ background: c.cor }} />
+                  <span className="text-sm font-semibold text-neutral-800">{c.label} Ads</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <div className="text-[11px] text-neutral-400">Investido</div>
+                    <div className="text-base font-bold text-neutral-800">{brl(c.gasto)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-neutral-400">Vendas rastreadas</div>
+                    <div className="text-base font-bold text-neutral-800">{brl(c.receita)}</div>
+                    <div className="text-[10px] text-neutral-400">{c.pedidos} ped.</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-neutral-400">Retorno (ROAS)</div>
+                    <div className={`text-base font-bold ${roas == null ? "text-neutral-300" : roas >= 1 ? "text-emerald-600" : "text-red-500"}`}>{roas == null ? "—" : `${roas.toFixed(1)}x`}</div>
+                  </div>
+                </div>
+                <p className="text-[11px] text-neutral-500 mt-3 leading-snug">
+                  {roas == null
+                    ? "Sem gasto sincronizado no período."
+                    : <>Cada <b>R$ 1</b> investido no {c.label} trouxe <b style={{ color: c.cor }}>{brl(c.receita / c.gasto)}</b> em vendas que conseguimos rastrear.</>}
+                </p>
+              </div>
+            );
+          })}
         </div>
+        <p className="text-[11px] text-neutral-400 mt-2">"Vendas rastreadas" = pedidos que a atribuição conseguiu ligar ao anúncio. É <b>piso, não teto</b>: cresce conforme a cobertura melhora (principalmente no Meta).</p>
+      </div>
 
-        {/* Donut por fonte */}
-        <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
-          <h3 className="text-sm font-semibold text-neutral-700 mb-1">Toques por canal</h3>
-          <div className="flex items-center gap-2">
-            <div style={{ width: 130, height: 130 }} className="shrink-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={porCanalToques} dataKey="value" nameKey="name" innerRadius={38} outerRadius={60} paddingAngle={2} stroke="#ffffff" strokeWidth={2}>
-                    {porCanalToques.map((e) => <Cell key={e.k} fill={e.cor} />)}
-                  </Pie>
-                  <RTooltip contentStyle={{ borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 12 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="flex-1 space-y-1.5">
-              {porCanalToques.map((e) => (
-                <div key={e.k} className="flex items-center gap-2 text-xs">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: e.cor }} />
-                  <span className="text-neutral-600 flex-1">{e.name}</span>
-                  <span className="font-semibold text-neutral-800">{e.value}</span>
-                  <span className="text-neutral-400 w-9 text-right">{(() => { const tot = somaN(toques.filter(isAd)); return tot ? Math.round((e.value / tot) * 100) : 0; })()}%</span>
+      {/* Top criativos que mais venderam + Receita por canal */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
+          <h3 className="text-sm font-semibold text-neutral-700 mb-1 flex items-center gap-1.5"><Award className="w-4 h-4 text-amber-500" /> Top criativos que mais venderam</h3>
+          <p className="text-[11px] text-neutral-400 mb-3">Anúncios ordenados pela receita que trouxeram · {modelo === "primeiro" ? "quem trouxe (1º toque)" : "quem fechou (último toque)"}.</p>
+          {topCriativos.length === 0 ? (
+            <p className="text-xs text-neutral-400 py-4 text-center">Ainda sem vendas atribuídas a criativos neste período.</p>
+          ) : (
+            <div className="space-y-2.5">
+              {topCriativos.map((c, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="w-5 text-center text-xs font-bold text-neutral-400 shrink-0">{i + 1}</span>
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CANAIS[c.canal].cor }} title={CANAIS[c.canal].label} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium text-neutral-800 truncate" title={c.nome}>{c.nome}</div>
+                    <div className="mt-1 h-1.5 rounded-full bg-neutral-100 overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(c.receita / topCriativos[0].receita) * 100}%`, background: CANAIS[c.canal].cor }} />
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 w-24">
+                    <div className="text-sm font-bold text-neutral-800">{brl(c.receita)}</div>
+                    <div className="text-[10px] text-neutral-400">{c.pedidos} ped.{c.roas != null && <> · <span className={c.roas >= 1 ? "text-emerald-600 font-semibold" : "text-red-500"}>{c.roas.toFixed(1)}x</span></>}</div>
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
+          )}
+        </div>
 
-          {/* Receita por canal (modelo) */}
-          <h3 className="text-sm font-semibold text-neutral-700 mt-4 mb-2">Receita por canal <span className="text-[10px] font-normal text-neutral-400">· {modelo === "primeiro" ? "1º toque" : "último toque"}</span></h3>
+        <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
+          <h3 className="text-sm font-semibold text-neutral-700 mb-1">Receita por canal</h3>
+          <p className="text-[11px] text-neutral-400 mb-3">De qual canal veio o dinheiro · {modelo === "primeiro" ? "1º toque" : "último toque"}.</p>
           <div className="space-y-2">
             {receitaPorCanal.map((r) => (
               <div key={r.k} className="text-xs">
@@ -589,46 +628,26 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
         </div>
       </div>
 
-      {/* Pedidos por dia (leitura principal) + pistas dos diretos */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-neutral-700">Pedidos por dia · com origem (1º toque) vs direto</h3>
-            <Legenda canais={canaisPedidos} />
-          </div>
-          <div style={{ height: 200 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={pedidosSerie} barCategoryGap="28%">
-                <CartesianGrid vertical={false} stroke="#f1f2f4" />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} width={26} />
-                <RTooltip contentStyle={{ borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 12 }} cursor={{ fill: "rgba(99,102,241,0.05)" }} />
-                {canaisPedidos.map((k) => (
-                  <Bar key={k} dataKey={k} name={CANAIS[k].label} stackId="p" fill={CANAIS[k].cor} stroke="#ffffff" strokeWidth={1} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="text-[11px] text-neutral-400 mt-1">Cinza = sem origem (direto/recorrente ou anterior ao rastreio). A fatia colorida é a que cresce conforme a cobertura melhora.</p>
+      {/* Vendas por dia */}
+      <div className="mt-4 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold text-neutral-700">Vendas por dia · de onde vieram</h3>
+          <Legenda canais={canaisPedidos} />
         </div>
-
-        <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
-          <h3 className="text-sm font-semibold text-neutral-700">Pistas dos "diretos"</h3>
-          <p className="text-[11px] text-neutral-400 mb-3">De onde vêm as visitas SEM anúncio (orgânico, indicação, IA, bio...).</p>
-          {pistas.length === 0 ? (
-            <p className="text-xs text-neutral-400 py-3">Ativa com a Tag 1 v3 (§3 da receita) republicada — aí todo 1º acesso da sessão registra o referrer.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {pistas.map(([s, n]) => (
-                <div key={s} className="flex items-center gap-2 text-xs">
-                  <span className="w-2 h-2 rounded-full shrink-0 bg-neutral-400" />
-                  <span className="font-mono text-neutral-700 flex-1 truncate">{s}</span>
-                  <span className="font-semibold text-neutral-800">{n}</span>
-                </div>
+        <div style={{ height: 200 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={pedidosSerie} barCategoryGap="28%">
+              <CartesianGrid vertical={false} stroke="#f1f2f4" />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} width={26} />
+              <RTooltip contentStyle={{ borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 12 }} cursor={{ fill: "rgba(99,102,241,0.05)" }} />
+              {canaisPedidos.map((k) => (
+                <Bar key={k} dataKey={k} name={CANAIS[k].label} stackId="p" fill={CANAIS[k].cor} stroke="#ffffff" strokeWidth={1} />
               ))}
-            </div>
-          )}
+            </BarChart>
+          </ResponsiveContainer>
         </div>
+        <p className="text-[11px] text-neutral-400 mt-1">Cinza = compra sem origem rastreada (direto/recorrente). A cor mostra qual canal trouxe — a fatia colorida cresce conforme a cobertura melhora.</p>
       </div>
 
       {/* Campanhas: plataforma × atribuição — um bloco por canal */}
