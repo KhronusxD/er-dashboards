@@ -35,6 +35,10 @@
 
 **v3 (15/07):** + decodificação de UTMs com duplo-encoding (`%5B`→`[`, `+`→espaço)
 e captura de orgânico/direto.
+**v5 (19/08):** ⚠️ **para de gravar `direct`** — tráfego direto/interno era ~60%
+do volume (226k toques em 5 semanas → estourava o painel e inchava o Supabase) e
+não tem valor de atribuição. Mantém `ad_click` + `referral` externo. O cookie
+`nap_vid` continua sendo plantado em toda página (só o POST do toque é filtrado).
 
 ```html
 <script>
@@ -81,9 +85,16 @@ e captura de orgânico/direto.
   var jaNaSessao = false; try { jaNaSessao = sessionStorage.getItem('nap_t') === '1'; } catch(e) {}
   var ref = document.referrer || '';
   var refExterno = ref !== '' && ref.indexOf('atualcard.com.br') === -1;
-  if (!temCampanha && jaNaSessao) return;   // orgânico/direto: só o 1º pageview da sessão
+  // v5 (19/08): NÃO gravar toque 'direct'. Tráfego direto/interno era ~60% do
+  // volume e não tem valor de atribuição (o servidor só credita 'ad_click').
+  // O cookie nap_vid já foi plantado acima pra TODOS; aqui só decidimos o POST.
+  // Mantém: ad_click (sempre) + referral externo (1x/sessão, pista de origem).
+  if (!temCampanha) {
+    if (!refExterno) return;              // direto/interno → não grava (corta o ruído)
+    if (jaNaSessao) return;               // referral → só o 1º pageview da sessão
+  }
   try { sessionStorage.setItem('nap_t', '1'); } catch(e) {}
-  var tipo = temCampanha ? 'ad_click' : (refExterno ? 'referral' : 'direct');
+  var tipo = temCampanha ? 'ad_click' : 'referral';
   var refHost = ''; try { refHost = ref ? new URL(ref).hostname.replace(/^www\./,'') : ''; } catch(e) {}
 
   var payload = {
