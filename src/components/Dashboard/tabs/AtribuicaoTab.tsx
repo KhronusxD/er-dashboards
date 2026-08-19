@@ -7,6 +7,7 @@ import {
 import {
   Target, Users, Receipt, Clock, X, ChevronRight, LayoutDashboard,
   MousePointerClick, ShoppingCart, UserCheck, Route, Radio, Sparkles, Percent,
+  RefreshCw,
 } from "lucide-react";
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
@@ -94,6 +95,7 @@ type Toque = {
   campaign_id: string | null; adset_id: string | null; ad_id: string | null;
   fbclid: string | null; gclid: string | null;
   landing_url: string | null; device: string | null;
+  n?: number;   // toques AGREGADOS (combos vindos da RPC atr_toques_agg): contagem do combo
 };
 
 type Modelo = "primeiro" | "ultimo";
@@ -132,6 +134,8 @@ const dt = (iso: string) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-
 const dtHora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 const dias = (a: string, b: string) => Math.max(0, (new Date(b).getTime() - new Date(a).getTime()) / 86400000);
 const diaKey = (iso: string) => iso.slice(0, 10);
+// soma de toques respeitando combos agregados (n); toque cru conta 1
+const somaN = (ts: Toque[]) => ts.reduce((s, t) => s + (t.n ?? 1), 0);
 
 // ── Componente principal ─────────────────────────────────────────────────────
 export function AtribuicaoTab() {
@@ -140,6 +144,7 @@ export function AtribuicaoTab() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [gastos, setGastos] = useState<Gasto[]>([]);
+  const [toquesFeed, setToquesFeed] = useState<Toque[]>([]);   // feed cru recente (eventos individuais)
   const [loading, setLoading] = useState(true);
   const [modelo, setModelo] = useState<Modelo>("primeiro");
   const [periodoOpcao, setPeriodoOpcao] = useState<PeriodoOpcao>("14d");
@@ -152,22 +157,13 @@ export function AtribuicaoTab() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    // toques: o PostgREST corta em 1000 linhas por request — paginar de verdade
+    // toques: em vez de baixar 170k+ linhas cruas (só cabiam ~2,5 dias), baixamos
+    // os COMBOS agregados (RPC atr_toques_agg → poucos milhares, histórico inteiro)
+    // e um feed cru recente (só o "Feed de toques" precisa de eventos individuais).
     const cols = "id, vid, ocorrido_em, tipo, source, medium, campaign, content, term, campaign_id, adset_id, ad_id, fbclid, gclid, landing_url, device";
-    const pagina = (i: number) => supabase.from("atr_toques").select(cols)
-      .order("ocorrido_em", { ascending: false }).range(i * 1000, i * 1000 + 999);
-    const carregaToques = async () => {
-      let tudo: Toque[] = [];
-      for (let i = 0; i < 15; i++) {              // até 15k toques
-        const { data } = await pagina(i);
-        const chunk = (data as any) ?? [];
-        tudo = tudo.concat(chunk);
-        if (chunk.length < 1000) break;
-      }
-      return tudo;
-    };
-    const [tq, { count }, { data: peds }, { data: clis }, { data: gst }] = await Promise.all([
-      carregaToques(),
+    const [aggRes, feedRes, { count }, { data: peds }, { data: clis }, { data: gst }] = await Promise.all([
+      supabase.rpc("atr_toques_agg"),
+      supabase.from("atr_toques").select(cols).order("ocorrido_em", { ascending: false }).limit(600),
       supabase.from("atr_toques").select("id", { count: "exact", head: true }),
       supabase.from("atr_pedidos")
         .select("pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque")
@@ -175,14 +171,48 @@ export function AtribuicaoTab() {
       supabase.from("atr_clientes").select("cliente_id, email, cnpj, cpf, nome, telefone, plataforma_id").limit(3000),
       supabase.from("atr_gastos").select("dia, canal, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, gasto, cliques, plataforma_compras, plataforma_receita").limit(8000),
     ]);
-    setToques((tq as any) ?? []);
-    setTotalToques(count ?? (tq as any[]).length);
+    // combos → objetos tipo Toque (contagem em n; data ancorada no meio-dia do dia)
+    const combos: Toque[] = (((aggRes as any).data as any[]) ?? []).map((r, i) => ({
+      id: -1 - i, vid: "", ocorrido_em: r.dia + "T12:00:00Z", tipo: r.tipo,
+      source: r.source, medium: null, campaign: r.campaign, content: r.content, term: r.term,
+      campaign_id: r.campaign_id, adset_id: r.adset_id, ad_id: r.ad_id,
+      fbclid: r.tem_fbclid ? "x" : null, gclid: r.tem_gclid ? "x" : null,
+      landing_url: null, device: null, n: Number(r.n) || 1,
+    }));
+    setToques(combos);
+    setToquesFeed((feedRes as any).data ?? []);
+    setTotalToques(count ?? 0);
     setPedidos((peds as any) ?? []);
     setClientes((clis as any) ?? []);
     setGastos((gst as any) ?? []);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Botão "Atualizar dados": re-puxa Meta+Google na nuvem (Edge Function) e recarrega.
+  const [sincronizando, setSincronizando] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const atualizarDados = useCallback(async () => {
+    setSincronizando(true);
+    setSyncMsg(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("sync-gastos", { body: {} });
+      if (error) throw error;
+      const partes: string[] = [];
+      const fmt = (c: any, nome: string) =>
+        c ? (c.ok ? `${nome} ✓ ${c.linhas}` : `${nome} ✗`) : null;
+      const m = fmt((data as any)?.meta, "Meta");
+      const g = fmt((data as any)?.google, "Google");
+      if (m) partes.push(m);
+      if (g) partes.push(g);
+      setSyncMsg(partes.join(" · ") || "sem retorno");
+      await load(); // rebusca o que acabou de entrar no banco
+    } catch (e: any) {
+      setSyncMsg("erro: " + (e?.message || String(e)));
+    } finally {
+      setSincronizando(false);
+    }
+  }, [load]);
 
   const clientePorId = useMemo(() => Object.fromEntries(clientes.map((c) => [c.cliente_id, c])), [clientes]);
   const vazio = !loading && toques.length === 0 && pedidos.length === 0;
@@ -202,9 +232,10 @@ export function AtribuicaoTab() {
   const intervalo = useMemo(() => intervaloPeriodo(periodoOpcao, customIni, customFim), [periodoOpcao, customIni, customFim]);
   const dentro = useCallback((iso: string) => { const t = new Date(iso).getTime(); return t >= intervalo.ini && t <= intervalo.fim; }, [intervalo]);
   const toquesF = useMemo(() => toques.filter((t) => dentro(t.ocorrido_em)), [toques, dentro]);
+  const toquesFeedF = useMemo(() => toquesFeed.filter((t) => dentro(t.ocorrido_em)), [toquesFeed, dentro]);
   const pedidosF = useMemo(() => pedidos.filter((p) => dentro(p.ocorrido_em)), [pedidos, dentro]);
   const gastosF = useMemo(() => gastos.filter((g) => dentro(g.dia + "T12:00:00")), [gastos, dentro]);
-  const totalToquesF = periodoOpcao === "max" ? totalToques : toquesF.length;
+  const totalToquesF = periodoOpcao === "max" ? totalToques : somaN(toquesF);
 
   const SUBS: { k: SubTab; l: string; Ic: any }[] = [
     { k: "visao", l: "Visão Geral", Ic: LayoutDashboard },
@@ -253,6 +284,17 @@ export function AtribuicaoTab() {
             </button>
           ))}
         </div>
+        <button onClick={atualizarDados} disabled={sincronizando}
+          title="Re-puxa gasto do Meta + Google agora (na nuvem) e atualiza o painel"
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
+          <RefreshCw className={`w-3.5 h-3.5 ${sincronizando ? "animate-spin" : ""}`} />
+          {sincronizando ? "Atualizando…" : "Atualizar dados"}
+        </button>
+        {syncMsg && (
+          <span className={`text-[11px] font-medium ${syncMsg.startsWith("erro") ? "text-red-600" : "text-neutral-500"}`}>
+            {syncMsg}
+          </span>
+        )}
         </div>
       </div>
 
@@ -275,7 +317,7 @@ export function AtribuicaoTab() {
       )}
 
       {!vazio && sub === "visao" && <VisaoGeral toques={toquesF} pedidos={pedidosF} gastos={gastosF} modelo={modelo} totalToques={totalToquesF} intervalo={intervalo} />}
-      {!vazio && sub === "origens" && <Origens toques={toquesF} pedidos={pedidosF} dic={dic} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
+      {!vazio && sub === "origens" && <Origens toques={toquesF} toquesFeed={toquesFeedF} pedidos={pedidosF} dic={dic} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
       {!vazio && sub === "criativos" && <Criativos pedidos={pedidosF} toques={toquesF} gastos={gastosF} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidosF} clientePorId={clientePorId} dic={dic} onJornada={setJornadaDe} />}
       {!vazio && sub === "clientes" && <ClientesView pedidos={pedidosF} clientes={clientes} dic={dic} onJornada={setJornadaDe} />}
@@ -323,7 +365,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
       if (!isAd(t)) continue;                       // gráfico = toques de anúncio
       const k = diaKey(t.ocorrido_em);
       if (idx[k] == null) continue;
-      (base[idx[k]] as any)[canalDe(t.source, t.gclid, t.fbclid)] += 1;
+      (base[idx[k]] as any)[canalDe(t.source, t.gclid, t.fbclid)] += (t.n ?? 1);
     }
     return base;
   }, [toques, janelaDias]);
@@ -331,7 +373,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
   // Donut por canal (toques) + receita por canal (pedidos, modelo escolhido)
   const porCanalToques = useMemo(() => {
     const m: Record<CanalKey, number> = { google: 0, meta: 0, teste: 0, outros: 0, direto: 0 };
-    for (const t of toques) { if (isAd(t)) m[canalDe(t.source, t.gclid, t.fbclid)] += 1; }
+    for (const t of toques) { if (isAd(t)) m[canalDe(t.source, t.gclid, t.fbclid)] += (t.n ?? 1); }
     return (Object.keys(CANAIS) as CanalKey[]).map((k) => ({ k, name: CANAIS[k].label, value: m[k], cor: CANAIS[k].cor })).filter((x) => x.value > 0);
   }, [toques]);
 
@@ -368,7 +410,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
   // Pistas: de onde vêm os "diretos" (toques orgânicos/referral — tag v3)
   const pistas = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const t of toques) { if (isAd(t)) continue; const k = t.source || "(direto, sem referrer)"; m[k] = (m[k] ?? 0) + 1; }
+    for (const t of toques) { if (isAd(t)) continue; const k = t.source || "(direto, sem referrer)"; m[k] = (m[k] ?? 0) + (t.n ?? 1); }
     return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8);
   }, [toques]);
 
@@ -413,7 +455,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
         : (t.campaign && g[t.campaign]) ? t.campaign
         : idx[canal][(t.campaign || "").trim().toLowerCase()];
       if (!key) continue;
-      g[key].toques += 1;
+      g[key].toques += (t.n ?? 1);
     }
     const lista = (c: "meta" | "google") => Object.values(grupos[c]).filter((r) => r.gasto > 0).sort((a, b) => b.gasto - a.gasto).slice(0, 12);
     return { meta: lista("meta"), google: lista("google") };
@@ -474,7 +516,7 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: e.cor }} />
                   <span className="text-neutral-600 flex-1">{e.name}</span>
                   <span className="font-semibold text-neutral-800">{e.value}</span>
-                  <span className="text-neutral-400 w-9 text-right">{toques.length ? Math.round((e.value / toques.length) * 100) : 0}%</span>
+                  <span className="text-neutral-400 w-9 text-right">{(() => { const tot = somaN(toques.filter(isAd)); return tot ? Math.round((e.value / tot) * 100) : 0; })()}%</span>
                 </div>
               ))}
             </div>
@@ -555,8 +597,8 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
 }
 
 // ═════════════════════════ SUB-ABA: ORIGENS (UTMs) ══════════════════════════
-function Origens({ toques, pedidos, dic, modelo, clientePorId, onAbrirVid, onJornada }: {
-  toques: Toque[]; pedidos: Pedido[]; dic: Dic; modelo: Modelo;
+function Origens({ toques, toquesFeed, pedidos, dic, modelo, clientePorId, onAbrirVid, onJornada }: {
+  toques: Toque[]; toquesFeed: Toque[]; pedidos: Pedido[]; dic: Dic; modelo: Modelo;
   clientePorId: Record<string, Cliente>;
   onAbrirVid: (vid: string) => void; onJornada: (c: Cliente) => void;
 }) {
@@ -572,6 +614,9 @@ function Origens({ toques, pedidos, dic, modelo, clientePorId, onAbrirVid, onJor
 
   const toquesF = useMemo(() => toques.filter((t) =>
     filtroCanal === "all" || canalDe(t.source, t.gclid, t.fbclid) === filtroCanal), [toques, filtroCanal]);
+  // feed cru (eventos individuais, recentes) — filtrado por canal
+  const feedF = useMemo(() => toquesFeed.filter((t) =>
+    filtroCanal === "all" || canalDe(t.source, t.gclid, t.fbclid) === filtroCanal), [toquesFeed, filtroCanal]);
 
   const snapDoPedido = useCallback((p: Pedido) => (modelo === "primeiro" ? p.primeiro_toque : p.ultimo_toque), [modelo]);
   const pedidosF = useMemo(() => pedidos.filter((p) => {
@@ -583,7 +628,7 @@ function Origens({ toques, pedidos, dic, modelo, clientePorId, onAbrirVid, onJor
   // utm_source crua — auditoria (muda conforme a visão)
   const porSourceCru = useMemo(() => {
     const m: Record<string, number> = {};
-    if (visao === "toques") for (const t of toquesF) { const k = t.source || "(vazio — só clid)"; m[k] = (m[k] ?? 0) + 1; }
+    if (visao === "toques") for (const t of toquesF) { const k = t.source || "(vazio — só clid)"; m[k] = (m[k] ?? 0) + (t.n ?? 1); }
     else for (const p of pedidosF) { const s = snapDoPedido(p); const k = s ? (s.source || "(sem source)") : "(sem origem)"; m[k] = (m[k] ?? 0) + 1; }
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
   }, [visao, toquesF, pedidosF, snapDoPedido]);
@@ -620,7 +665,7 @@ function Origens({ toques, pedidos, dic, modelo, clientePorId, onAbrirVid, onJor
         <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
             <span className="text-sm font-semibold text-neutral-700">{visao === "toques" ? "Feed de toques" : `Pedidos por canal (${modelo === "primeiro" ? "1º toque" : "último toque"})`}</span>
-            <span className="text-xs text-neutral-400">{visao === "toques" ? `${toquesF.length} no período` : `${pedidosF.length} no período`}</span>
+            <span className="text-xs text-neutral-400">{visao === "toques" ? `${somaN(toquesF)} no período` : `${pedidosF.length} no período`}</span>
           </div>
           <div className="overflow-x-auto">
             {visao === "toques" ? (
@@ -637,7 +682,7 @@ function Origens({ toques, pedidos, dic, modelo, clientePorId, onAbrirVid, onJor
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-50">
-                  {toquesF.slice(0, 80).map((t) => {
+                  {feedF.slice(0, 80).map((t) => {
                     const k = canalDe(t.source, t.gclid, t.fbclid);
                     const tp = TIPO_CHIP[t.tipo ?? "ad_click"] ?? TIPO_CHIP.ad_click;
                     return (
@@ -710,7 +755,7 @@ function Origens({ toques, pedidos, dic, modelo, clientePorId, onAbrirVid, onJor
                 </tbody>
               </table>
             )}
-            {visao === "toques" && toquesF.length > 80 && <p className="px-4 py-2 text-[11px] text-neutral-400">Mostrando 80 de {toquesF.length}.</p>}
+            {visao === "toques" && <p className="px-4 py-2 text-[11px] text-neutral-400">Feed = toques recentes (eventos individuais). Total do período: {somaN(toquesF)}.</p>}
             {visao === "pedidos" && pedidosF.length > 80 && <p className="px-4 py-2 text-[11px] text-neutral-400">Mostrando 80 de {pedidosF.length}.</p>}
           </div>
         </div>
@@ -811,7 +856,7 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
     for (const t of toques) {
       if (!isAd(t)) continue;                      // ranking pago: só cliques de anúncio
       const r = linha(chaveToque(t), canalDe(t.source, t.gclid, t.fbclid));
-      r.toques += 1;
+      r.toques += (t.n ?? 1);
       if (t.ad_id) r.adIds.add(t.ad_id);
     }
     for (const p of pedidos) {

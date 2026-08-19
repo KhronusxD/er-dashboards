@@ -1,0 +1,4 @@
+project_id = "dasbpktslyovikphwmrt"
+
+[functions.sync-gastos]
+verify_jwt = true
