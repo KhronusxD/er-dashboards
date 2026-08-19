@@ -30,17 +30,30 @@ NEXT=""
 PAGE=0
 while : ; do
   PAGE=$((PAGE+1))
-  if [ -z "$NEXT" ]; then
-    curl -s -m 60 -G "$URL" \
-      --data-urlencode "level=ad" \
-      --data-urlencode "fields=ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,inline_link_clicks,actions,action_values" \
-      --data-urlencode "time_range={\"since\":\"$SINCE\",\"until\":\"$UNTIL\"}" \
-      --data-urlencode "time_increment=1" \
-      --data-urlencode "limit=500" \
-      --data-urlencode "access_token=$ACCESS_TOKEN" -o /tmp/atr_gastos_page.json
-  else
-    curl -s -m 60 "$NEXT" -o /tmp/atr_gastos_page.json
-  fi
+  # fetch com RETRY em erro transitório do Graph API (temporarily unavailable,
+  # rate/request limit, try again...) — senão um blip deixa o dado velho por horas.
+  TRY=0
+  while : ; do
+    TRY=$((TRY+1))
+    if [ -z "$NEXT" ]; then
+      curl -s -m 60 -G "$URL" \
+        --data-urlencode "level=ad" \
+        --data-urlencode "fields=ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,inline_link_clicks,actions,action_values" \
+        --data-urlencode "time_range={\"since\":\"$SINCE\",\"until\":\"$UNTIL\"}" \
+        --data-urlencode "time_increment=1" \
+        --data-urlencode "limit=500" \
+        --data-urlencode "access_token=$ACCESS_TOKEN" -o /tmp/atr_gastos_page.json
+    else
+      curl -s -m 60 "$NEXT" -o /tmp/atr_gastos_page.json
+    fi
+    ERR=$(python3 -c "import json;d=json.load(open('/tmp/atr_gastos_page.json'));e=d.get('error');print((e or {}).get('message','') if e else '')" 2>/dev/null || echo "json inválido")
+    [ -z "$ERR" ] && break
+    if echo "$ERR" | grep -qiE "temporarily|rate limit|request limit|try again|reduce the amount|please reduce|unknown error|json inválido"; then
+      if [ "$TRY" -ge 5 ]; then echo "!! Meta erro transitório persistente ($TRY tentativas): $ERR"; break; fi
+      SL=$((TRY*20)); echo "  aviso Meta: '$ERR' — tentativa $TRY, aguardando ${SL}s"; sleep "$SL"; continue
+    fi
+    break   # erro não-transitório: deixa o parser abaixo falhar com a mensagem exata
+  done
   python3 - << 'PY' >> /tmp/atr_gastos_rows.jsonl
 import json
 d = json.load(open('/tmp/atr_gastos_page.json'))

@@ -50,9 +50,18 @@ async function puxaMeta(since: string, until: string) {
   });
   let url: string | null = `${base}?${params.toString()}`;
   const rows: any[] = [];
+  const transitorio = (m: string) => /temporarily|rate limit|request limit|try again|reduce the amount|please reduce|unknown error/i.test(m || "");
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   for (let page = 0; page < 20 && url; page++) {
-    const resp = await fetch(url);
-    const d = await resp.json();
+    // RETRY em erro transitório do Graph API (senão o botão falha à toa)
+    let d: any = null;
+    for (let tent = 1; tent <= 5; tent++) {
+      const resp = await fetch(url);
+      d = await resp.json();
+      if (!d.error) break;
+      if (transitorio(d.error.message) && tent < 5) { await sleep(tent * 2000); continue; }
+      break;
+    }
     if (d.error) throw new Error("Graph API: " + (d.error.message || "?"));
     for (const r of d.data || []) {
       rows.push({
