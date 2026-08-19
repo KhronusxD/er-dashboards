@@ -704,7 +704,7 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
       <TabelaCampanhas titulo="Google Ads" cor={CANAIS.google.cor} rows={campanhasPorCanal.google} modelo={modelo}
         rodape="Gasto por campanha; dados do Google atrasam ~1 dia. A atribuição engata quando o sufixo de URL estiver ativo." />
       <p className="text-[11px] text-neutral-400 mt-2">
-        Cobertura = compras que rastreamos ÷ compras que a plataforma reportou (teto de 100%). Um <b>*</b> significa que rastreamos <i>mais</i> do que a plataforma contou — o Google reporta conversões fracionadas/arredondadas e usa janela diferente, então o bruto pode passar de 100%.
+        Cobertura = compras que rastreamos ÷ compras que a plataforma reportou (conversões fracionadas somadas, sem arredondar). Um <b>*</b> = passou de 100%: nossa atribuição (1º/último toque) credita <i>mais</i> pedidos àquela campanha do que o modelo/janela da plataforma — comum em Display/view-through. Não é erro, são réguas diferentes.
       </p>
     </>
   );
@@ -1471,10 +1471,11 @@ function MiniKpi({ rotulo, valor }: { key?: React.Key; rotulo: string; valor: st
 
 function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Key; titulo: string; cor: string; rows: CampRow[]; modelo: Modelo; rodape?: string }) {
   const tot = rows.reduce((s, r) => ({ gasto: s.gasto + r.gasto, clq: s.clq + r.cliques, tq: s.tq + r.toques, pC: s.pC + r.pCompras, pR: s.pR + r.pReceita, aC: s.aC + r.aCompras, aR: s.aR + r.aReceita }), { gasto: 0, clq: 0, tq: 0, pC: 0, pR: 0, aC: 0, aR: 0 });
-  // Cobertura satura em 100%: é "quanto do que a plataforma reportou a gente
-  // também rastreou" — não faz sentido passar de 100% (arredondamento da
-  // plataforma + janelas de atribuição diferentes podem inflar o bruto).
-  const cobTot = tot.pC > 0 ? Math.min(100, (tot.aC / tot.pC) * 100) : null;
+  // Cobertura = compras rastreadas ÷ compras reportadas pela plataforma. Com o
+  // denominador já FRACIONADO (sem arredondar), mostramos o valor real: pode
+  // passar de 100% quando nossa atribuição (1º/último toque, jornada inteira)
+  // credita mais pedidos que o modelo/janela da plataforma (ex.: Display).
+  const cobTot = tot.pC > 0 ? (tot.aC / tot.pC) * 100 : null;
   const cobClqTot = tot.clq > 0 ? Math.min(100, (tot.tq / tot.clq) * 100) : null;
   const corCob = (v: number | null) => v == null ? "text-neutral-300" : v >= 50 ? "text-emerald-600" : "text-amber-600";
   // Google reporta conversões fracionadas — mostrar inteiro quando redondo, senão 1 casa.
@@ -1507,8 +1508,7 @@ function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Ke
             </thead>
             <tbody className="divide-y divide-neutral-50">
               {rows.map((c) => {
-                const cobBruta = c.pCompras > 0 ? (c.aCompras / c.pCompras) * 100 : null;
-                const cob = cobBruta == null ? null : Math.min(100, cobBruta);
+                const cob = c.pCompras > 0 ? (c.aCompras / c.pCompras) * 100 : null;
                 return (
                   <tr key={c.key} className="hover:bg-neutral-50">
                     <td className="px-4 py-2.5 text-neutral-800 font-medium max-w-[260px] truncate" title={c.nome}>{c.nome}</td>
@@ -1523,8 +1523,8 @@ function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Ke
                     <td className="px-2 py-2.5 text-right font-semibold text-indigo-700">{c.aCompras}</td>
                     <td className="px-2 py-2.5 text-right font-semibold text-indigo-700 whitespace-nowrap">{brl(c.aReceita)}</td>
                     <td className={`px-2 py-2.5 text-right font-semibold ${cob == null ? "text-neutral-300" : cob >= 50 ? "text-emerald-600" : "text-amber-600"}`}
-                      title={cobBruta != null && cobBruta > 100 ? `rastreamos ${cobBruta.toFixed(0)}% do que a plataforma reportou (arredondamento/janelas diferentes) — exibido no teto de 100%` : undefined}>
-                      {cob == null ? "—" : `${cob.toFixed(0)}%${cobBruta != null && cobBruta > 100 ? "*" : ""}`}
+                      title={cob != null && cob > 100 ? `nossa atribuição credita ${c.aCompras} pedido(s) a esta campanha; a plataforma reportou ${fmtC(c.pCompras)} — modelo/janela diferentes (comum em Display)` : undefined}>
+                      {cob == null ? "—" : `${cob.toFixed(0)}%${cob > 100 ? "*" : ""}`}
                     </td>
                   </tr>
                 );
