@@ -127,7 +127,7 @@ async function puxaGoogle(since: string, until: string) {
         gasto: Number(r.metrics.costMicros || 0) / 1e6,
         impressoes: Number(r.metrics.impressions || 0),
         cliques: Number(r.metrics.clicks || 0),
-        plataforma_compras: Math.round(Number(r.metrics.conversions || 0)),
+        plataforma_compras: Math.round(Number(r.metrics.conversions || 0) * 100) / 100, // conversões fracionadas (Google): 2 casas, sem arredondar p/ inteiro
         plataforma_receita: Number(r.metrics.conversionsValue || 0),
       });
     }

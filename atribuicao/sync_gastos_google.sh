@@ -47,7 +47,7 @@ for b in d:
         vals.append("('{}','google','{}','{}',NULL,NULL,NULL,NULL,{},{},{},{},{})".format(
             s['date'], c['id'], esc(c.get('name','')),
             int(m.get('costMicros',0))/1e6, int(m.get('impressions',0)), int(m.get('clicks',0)),
-            round(float(m.get('conversions',0))), float(m.get('conversionsValue',0))))
+            round(float(m.get('conversions',0)), 2), float(m.get('conversionsValue',0))))  # conversões fracionadas (Google) — NÃO arredondar p/ inteiro
 if not vals:
     open('/tmp/gads_upsert.sql','w').write("select 'sem linhas (Google atrasa ~1 dia)';")
 else:

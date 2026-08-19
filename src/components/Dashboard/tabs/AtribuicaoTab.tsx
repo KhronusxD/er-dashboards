@@ -1477,6 +1477,8 @@ function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Ke
   const cobTot = tot.pC > 0 ? Math.min(100, (tot.aC / tot.pC) * 100) : null;
   const cobClqTot = tot.clq > 0 ? Math.min(100, (tot.tq / tot.clq) * 100) : null;
   const corCob = (v: number | null) => v == null ? "text-neutral-300" : v >= 50 ? "text-emerald-600" : "text-amber-600";
+  // Google reporta conversões fracionadas — mostrar inteiro quando redondo, senão 1 casa.
+  const fmtC = (n: number) => Number.isInteger(n) ? String(n) : n.toFixed(1);
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden mt-4">
       <div className="px-4 py-3 border-b border-neutral-200 flex items-center gap-2 flex-wrap">
@@ -1516,7 +1518,7 @@ function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Ke
                     <td className={`px-2 py-2.5 text-right font-semibold ${corCob(c.cliques > 0 ? Math.min(100, (c.toques / c.cliques) * 100) : null)}`}>
                       {c.cliques > 0 ? `${Math.min(100, (c.toques / c.cliques) * 100).toFixed(0)}%` : "—"}
                     </td>
-                    <td className="px-2 py-2.5 text-right text-neutral-600">{c.pCompras}</td>
+                    <td className="px-2 py-2.5 text-right text-neutral-600">{fmtC(c.pCompras)}</td>
                     <td className="px-2 py-2.5 text-right text-neutral-600 whitespace-nowrap">{brl(c.pReceita)}</td>
                     <td className="px-2 py-2.5 text-right font-semibold text-indigo-700">{c.aCompras}</td>
                     <td className="px-2 py-2.5 text-right font-semibold text-indigo-700 whitespace-nowrap">{brl(c.aReceita)}</td>
@@ -1533,7 +1535,7 @@ function TabelaCampanhas({ titulo, cor, rows, modelo, rodape }: { key?: React.Ke
                 <td className="px-2 py-2.5 text-right">{tot.clq}</td>
                 <td className="px-2 py-2.5 text-right text-indigo-700">{tot.tq}</td>
                 <td className={`px-2 py-2.5 text-right ${corCob(cobClqTot)}`}>{cobClqTot == null ? "—" : `${cobClqTot.toFixed(0)}%`}</td>
-                <td className="px-2 py-2.5 text-right">{tot.pC}</td>
+                <td className="px-2 py-2.5 text-right">{fmtC(tot.pC)}</td>
                 <td className="px-2 py-2.5 text-right whitespace-nowrap">{brl(tot.pR)}</td>
                 <td className="px-2 py-2.5 text-right text-indigo-700">{tot.aC}</td>
                 <td className="px-2 py-2.5 text-right text-indigo-700 whitespace-nowrap">{brl(tot.aR)}</td>

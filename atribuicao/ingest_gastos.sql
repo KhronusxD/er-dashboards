@@ -32,7 +32,7 @@ BEGIN
       coalesce((r->>'gasto')::numeric, 0),
       coalesce((r->>'impressoes')::bigint, 0),
       coalesce((r->>'cliques')::bigint, 0),
-      coalesce((r->>'plataforma_compras')::bigint, 0),
+      coalesce((r->>'plataforma_compras')::numeric, 0),
       coalesce((r->>'plataforma_receita')::numeric, 0)
     )
     ON CONFLICT (dia, canal, coalesce(ad_id,''), coalesce(campaign_id,'')) DO UPDATE SET
