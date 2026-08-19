@@ -145,6 +145,7 @@ export function AtribuicaoTab() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [toquesFeed, setToquesFeed] = useState<Toque[]>([]);   // feed cru recente (eventos individuais)
+  const [resumo, setResumo] = useState<any>(null);            // agregados server-side (KPIs/canais/campanhas)
   const [loading, setLoading] = useState(true);
   const [modelo, setModelo] = useState<Modelo>("primeiro");
   const [periodoOpcao, setPeriodoOpcao] = useState<PeriodoOpcao>("14d");
@@ -242,6 +243,18 @@ export function AtribuicaoTab() {
 
   // Filtro GLOBAL de período (intervalo com início E fim) — vale pra todas as sub-abas
   const intervalo = useMemo(() => intervaloPeriodo(periodoOpcao, customIni, customFim), [periodoOpcao, customIni, customFim]);
+  // Resumo agregado server-side (KPIs/receita/canais/campanhas) — refetch por período.
+  // Números pesados vêm daqui, não de iterar pedidos crus no navegador.
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const p_desde = intervalo.ini > 0 ? new Date(intervalo.ini).toISOString() : null;
+      const p_ate = new Date(intervalo.fim).toISOString();
+      const { data } = await supabase.rpc("atr_resumo", { p_desde, p_ate });
+      if (!cancel) setResumo(data ?? null);
+    })();
+    return () => { cancel = true; };
+  }, [intervalo]);
   const dentro = useCallback((iso: string) => { const t = new Date(iso).getTime(); return t >= intervalo.ini && t <= intervalo.fim; }, [intervalo]);
   const toquesF = useMemo(() => toques.filter((t) => dentro(t.ocorrido_em)), [toques, dentro]);
   const toquesFeedF = useMemo(() => toquesFeed.filter((t) => dentro(t.ocorrido_em)), [toquesFeed, dentro]);
@@ -328,7 +341,7 @@ export function AtribuicaoTab() {
         </div>
       )}
 
-      {!vazio && sub === "visao" && <VisaoGeral toques={toquesF} pedidos={pedidosF} gastos={gastosF} modelo={modelo} totalToques={totalToquesF} intervalo={intervalo} />}
+      {!vazio && sub === "visao" && <VisaoGeral toques={toquesF} resumo={resumo} gastos={gastosF} modelo={modelo} totalToques={totalToquesF} intervalo={intervalo} />}
       {!vazio && sub === "origens" && <Origens toques={toquesF} toquesFeed={toquesFeedF} pedidos={pedidosF} dic={dic} modelo={modelo} clientePorId={clientePorId} onAbrirVid={setVidAberto} onJornada={setJornadaDe} />}
       {!vazio && sub === "criativos" && <Criativos pedidos={pedidosF} toques={toquesF} gastos={gastosF} modelo={modelo} clientePorId={clientePorId} onJornada={setJornadaDe} />}
       {!vazio && sub === "pedidos" && <PedidosView pedidos={pedidosF} clientePorId={clientePorId} dic={dic} onJornada={setJornadaDe} />}
@@ -343,7 +356,8 @@ export function AtribuicaoTab() {
 }
 
 // ═════════════════════════ SUB-ABA: VISÃO GERAL ═════════════════════════════
-function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }: { toques: Toque[]; pedidos: Pedido[]; gastos: Gasto[]; modelo: Modelo; totalToques: number; intervalo: Intervalo }) {
+function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: { toques: Toque[]; resumo: any; gastos: Gasto[]; modelo: Modelo; totalToques: number; intervalo: Intervalo }) {
+  const totais = resumo?.totais ?? { pedidos: 0, receita: 0, clientes: 0, com_origem: 0, tempo_medio_dias: null };
   // Dias do intervalo selecionado (ancorados no FIM do período; máx. 60 barras)
   const janelaDias = useMemo(() => {
     const DIA = 86400000;
@@ -360,14 +374,12 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
     }
     return dias;
   }, [intervalo]);
-  const receita = useMemo(() => pedidos.reduce((s, p) => s + (Number(p.valor) || 0), 0), [pedidos]);
-  const clientesUnicos = useMemo(() => new Set(pedidos.map((p) => p.cliente_id).filter(Boolean)).size, [pedidos]);
-  const comOrigem = useMemo(() => pedidos.filter((p) => p.primeiro_toque).length, [pedidos]);
-  const pctOrigem = pedidos.length ? Math.round((comOrigem / pedidos.length) * 100) : 0;
-  const tempoMedio = useMemo(() => {
-    const ds = pedidos.filter((p) => p.primeiro_toque?.ocorrido_em).map((p) => dias(p.primeiro_toque!.ocorrido_em!, p.ocorrido_em));
-    return ds.length ? ds.reduce((a, b) => a + b, 0) / ds.length : null;
-  }, [pedidos]);
+  const nPedidos = Number(totais.pedidos) || 0;
+  const receita = Number(totais.receita) || 0;
+  const clientesUnicos = Number(totais.clientes) || 0;
+  const comOrigem = Number(totais.com_origem) || 0;
+  const pctOrigem = nPedidos ? Math.round((comOrigem / nPedidos) * 100) : 0;
+  const tempoMedio: number | null = totais.tempo_medio_dias == null ? null : Number(totais.tempo_medio_dias);
 
   // Série diária (14 dias) empilhada por canal
   const serieDiaria = useMemo(() => {
@@ -394,14 +406,14 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
       google: { receita: 0, pedidos: 0 }, meta: { receita: 0, pedidos: 0 }, teste: { receita: 0, pedidos: 0 },
       outros: { receita: 0, pedidos: 0 }, direto: { receita: 0, pedidos: 0 },
     };
-    for (const p of pedidos) {
-      const snap = modelo === "primeiro" ? p.primeiro_toque : p.ultimo_toque;
-      const k = snap ? canalDe(snap.source) : "direto";
-      m[k].receita += Number(p.valor) || 0; m[k].pedidos += 1;
+    for (const r of (resumo?.por_canal ?? [])) {
+      if (r.modelo !== modelo) continue;
+      const k = (r.canal as CanalKey) in m ? (r.canal as CanalKey) : "outros";
+      m[k].receita += Number(r.receita) || 0; m[k].pedidos += Number(r.pedidos) || 0;
     }
     return (Object.keys(CANAIS) as CanalKey[]).map((k) => ({ k, ...CANAIS[k], ...m[k] })).filter((x) => x.pedidos > 0)
       .sort((a, b) => b.receita - a.receita);
-  }, [pedidos, modelo]);
+  }, [resumo, modelo]);
   const maxRec = Math.max(1, ...receitaPorCanal.map((r) => r.receita));
 
   const canaisPresentes = (Object.keys(CANAIS) as CanalKey[]).filter((k) => serieDiaria.some((d) => (d as any)[k] > 0));
@@ -410,13 +422,14 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
   const pedidosSerie = useMemo(() => {
     const base: any[] = []; const idx: Record<string, number> = {};
     for (const d of janelaDias) { idx[d.key] = base.length; base.push({ label: d.label, google: 0, meta: 0, teste: 0, outros: 0, direto: 0 }); }
-    for (const p of pedidos) {
-      const k = diaKey(p.ocorrido_em);
-      if (idx[k] == null) continue;
-      base[idx[k]][p.primeiro_toque ? canalDe(p.primeiro_toque.source) : "direto"] += 1;
+    for (const r of (resumo?.serie_dia ?? [])) {
+      const i = idx[r.dia];
+      if (i == null) continue;
+      const canal = (r.canal in base[i]) ? r.canal : "direto";
+      base[i][canal] += Number(r.pedidos) || 0;
     }
     return base;
-  }, [pedidos, janelaDias]);
+  }, [resumo, janelaDias]);
   const canaisPedidos = (Object.keys(CANAIS) as CanalKey[]).filter((k) => pedidosSerie.some((d) => d[k] > 0));
 
   // Pistas: de onde vêm os "diretos" (toques orgânicos/referral — tag v3)
@@ -443,19 +456,19 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
     (["meta", "google"] as const).forEach((c) => {
       for (const k of Object.keys(grupos[c])) idx[c][grupos[c][k].nome.trim().toLowerCase()] = k;
     });
-    for (const p of pedidos) {
-      const s = modelo === "primeiro" ? p.primeiro_toque : p.ultimo_toque;
-      if (!s) continue;
-      const canal = canalDe(s.source);
+    // atribuição por campanha vem AGREGADA (resumo.por_campanha), pelo modelo escolhido
+    for (const r of (resumo?.por_campanha ?? [])) {
+      if (r.modelo !== modelo) continue;
+      const canal = r.canal;
       if (canal !== "meta" && canal !== "google") continue;
       const g = grupos[canal];
       // casa por: campaign_id | campo campaign carregando o próprio ID (sufixo
       // Google manda utm_campaign={campaignid}) | nome da campanha
-      const key = (s.campaign_id && g[s.campaign_id]) ? s.campaign_id
-        : (s.campaign && g[s.campaign]) ? s.campaign
-        : idx[canal][(s.campaign || "").trim().toLowerCase()];
+      const key = (r.campaign_id && g[r.campaign_id]) ? r.campaign_id
+        : (r.campaign && g[r.campaign]) ? r.campaign
+        : idx[canal][(r.campaign || "").trim().toLowerCase()];
       if (!key) continue;
-      g[key].aCompras += 1; g[key].aReceita += Number(p.valor) || 0;
+      g[key].aCompras += Number(r.compras) || 0; g[key].aReceita += Number(r.receita) || 0;
     }
     // TOQUES por campanha (cliques que a UTM conseguiu rastrear) — mesma cascata de chave
     for (const t of toques) {
@@ -471,14 +484,14 @@ function VisaoGeral({ toques, pedidos, gastos, modelo, totalToques, intervalo }:
     }
     const lista = (c: "meta" | "google") => Object.values(grupos[c]).filter((r) => r.gasto > 0).sort((a, b) => b.gasto - a.gasto).slice(0, 12);
     return { meta: lista("meta"), google: lista("google") };
-  }, [gastos, pedidos, toques, modelo]);
+  }, [gastos, resumo, toques, modelo]);
 
   return (
     <>
       {/* KPIs primários */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         <Kpi icone={<MousePointerClick className="w-4 h-4" />} rotulo="Toques" valor={String(totalToques)} />
-        <Kpi icone={<ShoppingCart className="w-4 h-4" />} rotulo="Pedidos" valor={String(pedidos.length)} />
+        <Kpi icone={<ShoppingCart className="w-4 h-4" />} rotulo="Pedidos" valor={String(nPedidos)} />
         <Kpi icone={<Percent className="w-4 h-4" />} rotulo="Pedidos c/ origem" valor={`${pctOrigem}%`} destaque={pctOrigem < 30 ? "baixo — cresce com o tempo" : undefined} />
         <Kpi icone={<Receipt className="w-4 h-4" />} rotulo="Receita" valor={brl(receita)} />
         <Kpi icone={<Users className="w-4 h-4" />} rotulo="Clientes" valor={String(clientesUnicos)} />
@@ -1001,12 +1014,31 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
 }
 
 // ═════════════════════════ SUB-ABA: PEDIDOS ═════════════════════════════════
+function Pager({ pagina, nPaginas, onPagina }: { key?: React.Key; pagina: number; nPaginas: number; onPagina: (p: number) => void }) {
+  if (nPaginas <= 1) return null;
+  return (
+    <div className="flex items-center justify-center gap-3 px-4 py-2.5 border-t border-neutral-100 text-xs">
+      <button onClick={() => onPagina(Math.max(0, pagina - 1))} disabled={pagina <= 0}
+        className="px-2.5 py-1 rounded-md border border-neutral-200 text-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-neutral-50">← Anterior</button>
+      <span className="text-neutral-500">Página {pagina + 1} de {nPaginas}</span>
+      <button onClick={() => onPagina(Math.min(nPaginas - 1, pagina + 1))} disabled={pagina >= nPaginas - 1}
+        className="px-2.5 py-1 rounded-md border border-neutral-200 text-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-neutral-50">Próxima →</button>
+    </div>
+  );
+}
+
 function PedidosView({ pedidos, clientePorId, dic, onJornada }: {
   pedidos: Pedido[]; clientePorId: Record<string, Cliente>; dic: Dic; onJornada: (c: Cliente) => void;
 }) {
   const [filtro, setFiltro] = useState<"todos" | "com" | "sem">("todos");
-  const lista = useMemo(() => pedidos.filter((p) =>
+  const listaFull = useMemo(() => pedidos.filter((p) =>
     filtro === "todos" ? true : filtro === "com" ? !!p.primeiro_toque : !p.primeiro_toque), [pedidos, filtro]);
+  const POR_PAGINA = 25;
+  const [pagina, setPagina] = useState(0);
+  useEffect(() => { setPagina(0); }, [filtro]);
+  const nPaginas = Math.max(1, Math.ceil(listaFull.length / POR_PAGINA));
+  const pag = Math.min(pagina, nPaginas - 1);
+  const lista = listaFull.slice(pag * POR_PAGINA, pag * POR_PAGINA + POR_PAGINA);
 
   const ToqueCell = ({ s }: { s: Snapshot }) => {
     if (!s) return <span className="text-neutral-300 italic">—</span>;
@@ -1031,7 +1063,7 @@ function PedidosView({ pedidos, clientePorId, dic, onJornada }: {
               className={`px-2.5 py-1 text-xs font-medium rounded-md ${filtro === v ? "bg-white text-indigo-700 shadow-sm border border-neutral-200" : "text-neutral-500"}`}>{l}</button>
           ))}
         </div>
-        <span className="text-xs text-neutral-400">{lista.length} pedido(s)</span>
+        <span className="text-xs text-neutral-400">{listaFull.length} pedido(s)</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -1083,6 +1115,7 @@ function PedidosView({ pedidos, clientePorId, dic, onJornada }: {
           </tbody>
         </table>
       </div>
+      <Pager pagina={pag} nPaginas={nPaginas} onPagina={setPagina} />
       <p className="px-4 py-2.5 text-[11px] text-neutral-400 border-t border-neutral-100">
         "Sem origem" = comprador entrou direto (recorrente) ou o toque é anterior ao rastreio. O ≠ marca jornadas multi-toque — criativo que trouxe difere do que fechou.
       </p>
@@ -1095,7 +1128,7 @@ function ClientesView({ pedidos, clientes, dic, onJornada }: {
   pedidos: Pedido[]; clientes: Cliente[]; dic: Dic; onJornada: (c: Cliente) => void;
 }) {
   const [origemFiltro, setOrigemFiltro] = useState<"todos" | "com" | "sem">("todos");
-  const linhas = useMemo(() => {
+  const linhasFull = useMemo(() => {
     const m: Record<number, { pedidos: number; receita: number; primeiro: Snapshot; primeiraCompra: string }> = {};
     for (const p of [...pedidos].sort((a, b) => a.ocorrido_em.localeCompare(b.ocorrido_em))) {
       if (!p.cliente_id) continue;
@@ -1109,6 +1142,12 @@ function ClientesView({ pedidos, clientes, dic, onJornada }: {
       .filter((l) => origemFiltro === "todos" ? true : origemFiltro === "com" ? !!l.primeiro : !l.primeiro)
       .sort((a, b) => b.receita - a.receita);
   }, [pedidos, clientes, origemFiltro]);
+  const POR_PAGINA = 25;
+  const [pagina, setPagina] = useState(0);
+  useEffect(() => { setPagina(0); }, [origemFiltro]);
+  const nPaginas = Math.max(1, Math.ceil(linhasFull.length / POR_PAGINA));
+  const pag = Math.min(pagina, nPaginas - 1);
+  const linhas = linhasFull.slice(pag * POR_PAGINA, pag * POR_PAGINA + POR_PAGINA);
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
@@ -1120,7 +1159,7 @@ function ClientesView({ pedidos, clientes, dic, onJornada }: {
               className={`px-2.5 py-1 text-xs font-medium rounded-md ${origemFiltro === v ? "bg-white text-indigo-700 shadow-sm border border-neutral-200" : "text-neutral-500"}`}>{l}</button>
           ))}
         </div>
-        <span className="text-xs text-neutral-400 ml-auto">{linhas.length}</span>
+        <span className="text-xs text-neutral-400 ml-auto">{linhasFull.length}</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -1166,6 +1205,7 @@ function ClientesView({ pedidos, clientes, dic, onJornada }: {
           </tbody>
         </table>
       </div>
+      <Pager pagina={pag} nPaginas={nPaginas} onPagina={setPagina} />
     </div>
   );
 }
