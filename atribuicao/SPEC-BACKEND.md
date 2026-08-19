@@ -39,9 +39,13 @@ Dispara logo após autenticar/criar a conta, no servidor:
 }}
 ```
 
-- O `vid` vem do cookie `nap_vid` que o GTM cria (ler do header Cookie do
-  request). Se não existir, mandar sem `vid` — ainda vale (atualiza cadastro).
+- O `vid` vem do cookie `nap_vid` que o GTM cria (ler do header `Cookie` do
+  request, domínio `www.atualcard.com.br`). Se não existir, mandar sem `vid` —
+  ainda vale (atualiza cadastro).
 - É idempotente: repetir não duplica (upsert por e-mail).
+- **`plataforma_id` (user_id interno) é o campo mais valioso**: com ele o sistema
+  costura até o usuário que volta **já logado** (sem passar pela tela de login) —
+  é justamente o caso que mais recupera atribuição do Meta. Sempre mandar.
 
 ## Chamada 2 — `purchase` (na CONFIRMAÇÃO do pedido, server-side)
 
@@ -65,6 +69,19 @@ Dispara quando o pedido é confirmado/pago, no servidor:
 - **Idempotente por `pedido_id`** — o GTM também envia esse evento no browser;
   quem chegar primeiro grava, o outro é ignorado. Mandar dos dois lados é o
   desenho correto (o server-side é o garantidor).
+
+## Teste rápido (curl — dá pra rodar antes de integrar)
+
+Trocar `<ANON_KEY>` e `<TRACK_TOKEN>` pelos valores que o Ed passar:
+
+```bash
+curl -s -X POST https://dasbpktslyovikphwmrt.supabase.co/rest/v1/rpc/track \
+  -H "apikey: <ANON_KEY>" -H "Content-Profile: napan" -H "Content-Type: application/json" \
+  -d '{"payload":{"token":"<TRACK_TOKEN>","type":"identify","email":"teste@exemplo.com","plataforma_id":"999999"}}'
+# esperado: {"ok":true,"evento":"identify",...}
+```
+
+Se o token estiver errado, responde `unauthorized` (é a autenticação leve do endpoint).
 
 ## Critério de aceite
 
