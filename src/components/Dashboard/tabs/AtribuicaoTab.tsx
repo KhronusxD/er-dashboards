@@ -380,6 +380,8 @@ export function AtribuicaoTab() {
 // ═════════════════════════ SUB-ABA: VISÃO GERAL ═════════════════════════════
 function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: { toques: Toque[]; resumo: any; gastos: Gasto[]; modelo: Modelo; totalToques: number; intervalo: Intervalo }) {
   const totais = resumo?.totais ?? { pedidos: 0, receita: 0, clientes: 0, com_origem: 0, tempo_medio_dias: null };
+  const [googleDim, setGoogleDim] = useState<"keyword" | "campanha">("keyword");
+  const [serieModo, setSerieModo] = useState<"num" | "pct">("num");
   // Dias do intervalo selecionado (ancorados no FIM do período; máx. 60 barras)
   const janelaDias = useMemo(() => {
     const DIA = 86400000;
@@ -403,9 +405,10 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
   const pctOrigem = nPedidos ? Math.round((comOrigem / nPedidos) * 100) : 0;
   const tempoMedio: number | null = totais.tempo_medio_dias == null ? null : Number(totais.tempo_medio_dias);
 
-  // Gasto por canal e por anúncio + nome do anúncio (do sync de gastos)
+  // Gasto por canal, por anúncio e por campanha + nomes (do sync de gastos)
   const gastoInfo = useMemo(() => {
     const nomeAd: Record<string, string> = {}, gastoPorAd: Record<string, number> = {};
+    const nomeCamp: Record<string, string> = {}, gastoPorCamp: Record<string, number> = {};
     const gastoCanal: Record<"meta" | "google", number> = { meta: 0, google: 0 };
     for (const g of gastos) {
       const c: "meta" | "google" = g.canal === "google" ? "google" : "meta";
@@ -414,8 +417,12 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
         gastoPorAd[g.ad_id] = (gastoPorAd[g.ad_id] || 0) + (Number(g.gasto) || 0);
         if (g.ad_name) nomeAd[g.ad_id] = g.ad_name;
       }
+      if (g.campaign_id) {
+        gastoPorCamp[g.campaign_id] = (gastoPorCamp[g.campaign_id] || 0) + (Number(g.gasto) || 0);
+        if (g.campaign_name) nomeCamp[g.campaign_id] = g.campaign_name;
+      }
     }
-    return { nomeAd, gastoPorAd, gastoCanal };
+    return { nomeAd, gastoPorAd, nomeCamp, gastoPorCamp, gastoCanal };
   }, [gastos]);
 
   const receitaPorCanal = useMemo(() => {
@@ -459,24 +466,44 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
   }, [resumo, janelaDias]);
   const canaisPedidos = (Object.keys(CANAIS) as CanalKey[]).filter((k) => pedidosSerie.some((d) => d[k] > 0));
 
-  // Top criativos que mais venderam (agregado por anúncio, modelo escolhido)
-  const topCriativos = useMemo(() => {
-    const m: Record<string, { nome: string; canal: CanalKey; receita: number; pedidos: number; adId: string | null }> = {};
+  // Top criativos do META (por anúncio → nome resolvido do sync)
+  const topMeta = useMemo(() => {
+    const m: Record<string, { nome: string; receita: number; pedidos: number; adId: string | null }> = {};
     for (const r of (resumo?.por_criativo ?? [])) {
-      if (r.modelo !== modelo) continue;
-      const canal = r.canal as CanalKey;
-      if (canal !== "meta" && canal !== "google") continue;
+      if (r.modelo !== modelo || r.canal !== "meta") continue;
       const adId: string | null = r.ad_id || null;
       const chave = adId || r.term || r.campaign || "(sem criativo)";
-      const nome = (adId && gastoInfo.nomeAd[adId]) || r.term || r.campaign || "(sem criativo)";
-      const e = (m[chave] ??= { nome, canal, receita: 0, pedidos: 0, adId });
+      const nome = (adId && gastoInfo.nomeAd[adId]) || r.term || (adId ? `Anúncio ${adId}` : (r.campaign || "(sem criativo)"));
+      const e = (m[chave] ??= { nome, receita: 0, pedidos: 0, adId });
       e.receita += Number(r.receita) || 0; e.pedidos += Number(r.pedidos) || 0;
     }
     return Object.values(m)
       .map((e) => { const gasto = e.adId ? (gastoInfo.gastoPorAd[e.adId] || 0) : 0; return { ...e, gasto, roas: gasto > 0 ? e.receita / gasto : null }; })
-      .sort((a, b) => b.receita - a.receita)
-      .slice(0, 8);
+      .sort((a, b) => b.receita - a.receita).slice(0, 6);
   }, [resumo, modelo, gastoInfo]);
+
+  // Top do GOOGLE por dimensão escolhida: palavra-chave (utm_term) ou campanha
+  const topGoogle = useMemo(() => {
+    const m: Record<string, { nome: string; receita: number; pedidos: number; campId: string | null }> = {};
+    for (const r of (resumo?.por_criativo ?? [])) {
+      if (r.modelo !== modelo || r.canal !== "google") continue;
+      let chave: string, nome: string, campId: string | null = null;
+      if (googleDim === "keyword") {
+        const kw = (r.term || "").trim();
+        chave = kw || "(sem palavra-chave)";
+        nome = kw || "(sem palavra-chave · Shopping/PMax)";
+      } else {
+        campId = r.campaign_id || null;
+        chave = campId || r.campaign || "(sem campanha)";
+        nome = (campId && gastoInfo.nomeCamp[campId]) || r.campaign || (campId ? `Campanha ${campId}` : "(sem campanha)");
+      }
+      const e = (m[chave] ??= { nome, receita: 0, pedidos: 0, campId });
+      e.receita += Number(r.receita) || 0; e.pedidos += Number(r.pedidos) || 0;
+    }
+    return Object.values(m)
+      .map((e) => { const gasto = (googleDim === "campanha" && e.campId) ? (gastoInfo.gastoPorCamp[e.campId] || 0) : 0; return { ...e, gasto, roas: gasto > 0 ? e.receita / gasto : null }; })
+      .sort((a, b) => b.receita - a.receita).slice(0, 6);
+  }, [resumo, modelo, gastoInfo, googleDim]);
 
   // Campanhas POR CANAL: o que a PLATAFORMA reporta × o que a ATRIBUIÇÃO já enxerga
   const campanhasPorCanal = useMemo(() => {
@@ -578,23 +605,21 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
         <p className="text-[11px] text-neutral-400 mt-2">"Vendas rastreadas" = pedidos que a atribuição conseguiu ligar ao anúncio. É <b>piso, não teto</b>: cresce conforme a cobertura melhora (principalmente no Meta).</p>
       </div>
 
-      {/* Top criativos que mais venderam + Receita por canal */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
-          <h3 className="text-sm font-semibold text-neutral-700 mb-1 flex items-center gap-1.5"><Award className="w-4 h-4 text-amber-500" /> Top criativos que mais venderam</h3>
-          <p className="text-[11px] text-neutral-400 mb-3">Anúncios ordenados pela receita que trouxeram · {modelo === "primeiro" ? "quem trouxe (1º toque)" : "quem fechou (último toque)"}.</p>
-          {topCriativos.length === 0 ? (
-            <p className="text-xs text-neutral-400 py-4 text-center">Ainda sem vendas atribuídas a criativos neste período.</p>
-          ) : (
+      {/* Top criativos que mais venderam — Meta e Google lado a lado */}
+      <div className="mt-4 flex items-center gap-1.5"><Award className="w-4 h-4 text-amber-500" /><h3 className="text-sm font-semibold text-neutral-700">Top criativos que mais venderam</h3><span className="text-[11px] text-neutral-400">· {modelo === "primeiro" ? "quem trouxe (1º toque)" : "quem fechou (último toque)"}</span></div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-2">
+        {/* META */}
+        <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
+          <h4 className="text-xs font-semibold text-neutral-700 mb-3 flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: CANAIS.meta.cor }} /> Meta Ads</h4>
+          {topMeta.length === 0 ? <p className="text-xs text-neutral-400 py-4 text-center">Sem vendas atribuídas ao Meta neste período.</p> : (
             <div className="space-y-2.5">
-              {topCriativos.map((c, i) => (
+              {topMeta.map((c, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <span className="w-5 text-center text-xs font-bold text-neutral-400 shrink-0">{i + 1}</span>
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CANAIS[c.canal].cor }} title={CANAIS[c.canal].label} />
+                  <span className="w-4 text-center text-xs font-bold text-neutral-400 shrink-0">{i + 1}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium text-neutral-800 truncate" title={c.nome}>{c.nome}</div>
                     <div className="mt-1 h-1.5 rounded-full bg-neutral-100 overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${(c.receita / topCriativos[0].receita) * 100}%`, background: CANAIS[c.canal].cor }} />
+                      <div className="h-full rounded-full" style={{ width: `${(c.receita / topMeta[0].receita) * 100}%`, background: CANAIS.meta.cor }} />
                     </div>
                   </div>
                   <div className="text-right shrink-0 w-24">
@@ -607,39 +632,62 @@ function VisaoGeral({ toques, resumo, gastos, modelo, totalToques, intervalo }: 
           )}
         </div>
 
+        {/* GOOGLE com filtro de dimensão */}
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
-          <h3 className="text-sm font-semibold text-neutral-700 mb-1">Receita por canal</h3>
-          <p className="text-[11px] text-neutral-400 mb-3">De qual canal veio o dinheiro · {modelo === "primeiro" ? "1º toque" : "último toque"}.</p>
-          <div className="space-y-2">
-            {receitaPorCanal.map((r) => (
-              <div key={r.k} className="text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: r.cor }} />
-                  <span className="text-neutral-600 flex-1">{r.label}</span>
-                  <span className="font-semibold text-neutral-800">{brl(r.receita)}</span>
-                  <span className="text-neutral-400">· {r.pedidos} ped.</span>
-                </div>
-                <div className="mt-1 h-1.5 rounded-full bg-neutral-100 overflow-hidden ml-[18px]">
-                  <div className="h-full rounded-full" style={{ width: `${(r.receita / maxRec) * 100}%`, background: r.cor }} />
-                </div>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-1 gap-2">
+            <h4 className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: CANAIS.google.cor }} /> Google Ads</h4>
+            <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">
+              {([["keyword", "Palavra-chave"], ["campanha", "Campanha"]] as const).map(([v, l]) => (
+                <button key={v} onClick={() => setGoogleDim(v)}
+                  className={`px-2 py-0.5 text-[11px] font-medium rounded-md ${googleDim === v ? "bg-white text-indigo-700 shadow-sm border border-neutral-200" : "text-neutral-500"}`}>{l}</button>
+              ))}
+            </div>
           </div>
+          <p className="text-[11px] text-neutral-400 mb-3">{googleDim === "keyword" ? "Por palavra-chave buscada (utm_term) — vazio = Shopping/PMax." : "Por campanha — com gasto e ROAS."}</p>
+          {topGoogle.length === 0 ? <p className="text-xs text-neutral-400 py-4 text-center">Sem vendas atribuídas ao Google neste período.</p> : (
+            <div className="space-y-2.5">
+              {topGoogle.map((c, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="w-4 text-center text-xs font-bold text-neutral-400 shrink-0">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium text-neutral-800 truncate" title={c.nome}>{c.nome}</div>
+                    <div className="mt-1 h-1.5 rounded-full bg-neutral-100 overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(c.receita / topGoogle[0].receita) * 100}%`, background: CANAIS.google.cor }} />
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 w-24">
+                    <div className="text-sm font-bold text-neutral-800">{brl(c.receita)}</div>
+                    <div className="text-[10px] text-neutral-400">{c.pedidos} ped.{c.roas != null && <> · <span className={c.roas >= 1 ? "text-emerald-600 font-semibold" : "text-red-500"}>{c.roas.toFixed(1)}x</span></>}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Vendas por dia */}
       <div className="mt-4 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
-        <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
           <h3 className="text-sm font-semibold text-neutral-700">Vendas por dia · de onde vieram</h3>
-          <Legenda canais={canaisPedidos} />
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">
+              {([["num", "Nº"], ["pct", "%"]] as const).map(([v, l]) => (
+                <button key={v} onClick={() => setSerieModo(v)}
+                  className={`px-2.5 py-0.5 text-[11px] font-medium rounded-md ${serieModo === v ? "bg-white text-indigo-700 shadow-sm border border-neutral-200" : "text-neutral-500"}`}>{l}</button>
+              ))}
+            </div>
+            <Legenda canais={canaisPedidos} />
+          </div>
         </div>
         <div style={{ height: 200 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={pedidosSerie} barCategoryGap="28%">
+            <BarChart data={pedidosSerie} barCategoryGap="28%" stackOffset={serieModo === "pct" ? "expand" : undefined}>
               <CartesianGrid vertical={false} stroke="#f1f2f4" />
               <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} width={26} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} width={serieModo === "pct" ? 32 : 26}
+                domain={serieModo === "pct" ? [0, 1] : undefined}
+                tickFormatter={serieModo === "pct" ? (v: number) => `${Math.round(v * 100)}%` : undefined} />
               <RTooltip contentStyle={{ borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 12 }} cursor={{ fill: "rgba(99,102,241,0.05)" }} />
               {canaisPedidos.map((k) => (
                 <Bar key={k} dataKey={k} name={CANAIS[k].label} stackId="p" fill={CANAIS[k].cor} stroke="#ffffff" strokeWidth={1} />
