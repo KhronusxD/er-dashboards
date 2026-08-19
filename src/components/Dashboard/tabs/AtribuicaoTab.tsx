@@ -686,6 +686,16 @@ function Origens({ toques, toquesFeed, pedidos, dic, modelo, clientePorId, onAbr
     direct:   { l: "direto",  c: "#94a3b8" },
   };
 
+  // paginação do feed (25/página), reseta ao trocar visão/canal
+  const POR_PAGINA = 25;
+  const [pagina, setPagina] = useState(0);
+  useEffect(() => { setPagina(0); }, [visao, filtroCanal]);
+  const ativaLen = visao === "toques" ? feedF.length : pedidosF.length;
+  const nPaginas = Math.max(1, Math.ceil(ativaLen / POR_PAGINA));
+  const pag = Math.min(pagina, nPaginas - 1);
+  const feedPage = feedF.slice(pag * POR_PAGINA, pag * POR_PAGINA + POR_PAGINA);
+  const pedidosPage = pedidosF.slice(pag * POR_PAGINA, pag * POR_PAGINA + POR_PAGINA);
+
   return (
     <div className="space-y-4">
       {/* Filtros: visão (toques/pedidos) + canal + período */}
@@ -729,7 +739,7 @@ function Origens({ toques, toquesFeed, pedidos, dic, modelo, clientePorId, onAbr
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-50">
-                  {feedF.slice(0, 80).map((t) => {
+                  {feedPage.map((t) => {
                     const k = canalDe(t.source, t.gclid, t.fbclid);
                     const tp = TIPO_CHIP[t.tipo ?? "ad_click"] ?? TIPO_CHIP.ad_click;
                     return (
@@ -774,7 +784,7 @@ function Origens({ toques, toquesFeed, pedidos, dic, modelo, clientePorId, onAbr
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-50">
-                  {pedidosF.slice(0, 80).map((p) => {
+                  {pedidosPage.map((p) => {
                     const s = snapDoPedido(p);
                     const k = s ? canalDe(s.source) : "direto";
                     const c = p.cliente_id ? clientePorId[p.cliente_id] : null;
@@ -802,8 +812,8 @@ function Origens({ toques, toquesFeed, pedidos, dic, modelo, clientePorId, onAbr
                 </tbody>
               </table>
             )}
+            <Pager pagina={pag} nPaginas={nPaginas} onPagina={setPagina} />
             {visao === "toques" && <p className="px-4 py-2 text-[11px] text-neutral-400">Feed = toques recentes (eventos individuais). Total do período: {somaN(toquesF)}.</p>}
-            {visao === "pedidos" && pedidosF.length > 80 && <p className="px-4 py-2 text-[11px] text-neutral-400">Mostrando 80 de {pedidosF.length}.</p>}
           </div>
         </div>
 
@@ -927,6 +937,12 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
       : ranking.filter((r) => r.nome === SEM_ATRIB), [ranking, origemFiltro]);
   const maxReceita = Math.max(1, ...linhasRank.map((r) => r.receita));
   const linhaAberta = linhasRank.find((r) => r.nome === aberto) ?? null;
+  const POR_PAGINA = 25;
+  const [pagina, setPagina] = useState(0);
+  useEffect(() => { setPagina(0); }, [nivel, origemFiltro]);
+  const nPaginas = Math.max(1, Math.ceil(linhasRank.length / POR_PAGINA));
+  const pag = Math.min(pagina, nPaginas - 1);
+  const linhasPage = linhasRank.slice(pag * POR_PAGINA, pag * POR_PAGINA + POR_PAGINA);
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
@@ -962,7 +978,7 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
       </div>
 
       <div className="divide-y divide-neutral-100">
-        {linhasRank.map((r) => (
+        {linhasPage.map((r) => (
           <div key={r.nome}>
             <button onClick={() => setAberto(aberto === r.nome ? null : r.nome)}
               className={`w-full text-left px-4 py-3 hover:bg-neutral-50 transition-colors ${aberto === r.nome ? "bg-indigo-50/50" : ""}`}>
@@ -1028,6 +1044,7 @@ function Criativos({ pedidos, toques, gastos, modelo, clientePorId, onJornada }:
           </div>
         ))}
       </div>
+      <Pager pagina={pag} nPaginas={nPaginas} onPagina={setPagina} />
       <p className="px-4 py-2.5 text-[11px] text-neutral-400 border-t border-neutral-100">
         Gasto = Meta, sincronizado do go-live (15/07) em diante — casa por ad_id ou pelo nome do anúncio. Google entra quando o sufixo de URL estiver ativo. ROAS = receita atribuída ÷ gasto; verde ≥ 1x.
       </p>
