@@ -137,6 +137,26 @@ const diaKey = (iso: string) => iso.slice(0, 10);
 // soma de toques respeitando combos agregados (n); toque cru conta 1
 const somaN = (ts: Toque[]) => ts.reduce((s, t) => s + (t.n ?? 1), 0);
 
+// paginador: PostgREST corta em 1000 linhas/consulta → buscar em blocos.
+// opts.desde/ate escopam por ocorrido_em (usado p/ carregar só o período).
+async function paginarTabela(
+  tabela: string, colsSel: string,
+  opts?: { ordena?: string; desde?: string | null; ate?: string | null }
+): Promise<any[]> {
+  let tudo: any[] = [];
+  for (let i = 0; i < 60; i++) {                       // teto de segurança: 60k linhas
+    let q = supabase.from(tabela).select(colsSel).range(i * 1000, i * 1000 + 999);
+    if (opts?.ordena) q = q.order(opts.ordena, { ascending: false });
+    if (opts?.desde) q = q.gte("ocorrido_em", opts.desde);
+    if (opts?.ate) q = q.lte("ocorrido_em", opts.ate);
+    const { data } = await q;
+    const chunk = (data as any[]) ?? [];
+    tudo = tudo.concat(chunk);
+    if (chunk.length < 1000) break;
+  }
+  return tudo;
+}
+
 // ── Componente principal ─────────────────────────────────────────────────────
 export function AtribuicaoTab() {
   const [sub, setSub] = useState<SubTab>("visao");
@@ -161,28 +181,14 @@ export function AtribuicaoTab() {
     // toques: em vez de baixar 170k+ linhas cruas (só cabiam ~2,5 dias), baixamos
     // os COMBOS agregados (RPC atr_toques_agg → poucos milhares, histórico inteiro)
     // e um feed cru recente (só o "Feed de toques" precisa de eventos individuais).
+    // Pedidos NÃO entram aqui: carregam escopados ao período (efeito separado).
     const cols = "id, vid, ocorrido_em, tipo, source, medium, campaign, content, term, campaign_id, adset_id, ad_id, fbclid, gclid, landing_url, device";
-    // PostgREST corta em 1000 linhas/consulta (o .limit não sobe isso) → paginar
-    // de verdade, senão pedidos/clientes/gastos vêm truncados (só os ~1000 recentes).
-    const paginar = async (tabela: string, colsSel: string, ordena?: string): Promise<any[]> => {
-      let tudo: any[] = [];
-      for (let i = 0; i < 60; i++) {                 // teto de segurança: 60k linhas
-        let q = supabase.from(tabela).select(colsSel).range(i * 1000, i * 1000 + 999);
-        if (ordena) q = q.order(ordena, { ascending: false });
-        const { data } = await q;
-        const chunk = (data as any[]) ?? [];
-        tudo = tudo.concat(chunk);
-        if (chunk.length < 1000) break;
-      }
-      return tudo;
-    };
-    const [aggRes, feedRes, { count }, peds, clis, gst] = await Promise.all([
+    const [aggRes, feedRes, { count }, clis, gst] = await Promise.all([
       supabase.rpc("atr_toques_agg"),
       supabase.from("atr_toques").select(cols).order("ocorrido_em", { ascending: false }).limit(600),
       supabase.from("atr_toques").select("id", { count: "exact", head: true }),
-      paginar("atr_pedidos", "pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque", "ocorrido_em"),
-      paginar("atr_clientes", "cliente_id, email, cnpj, cpf, nome, telefone, plataforma_id"),
-      paginar("atr_gastos", "dia, canal, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, gasto, cliques, plataforma_compras, plataforma_receita"),
+      paginarTabela("atr_clientes", "cliente_id, email, cnpj, cpf, nome, telefone, plataforma_id"),
+      paginarTabela("atr_gastos", "dia, canal, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, gasto, cliques, plataforma_compras, plataforma_receita"),
     ]);
     // combos → objetos tipo Toque (contagem em n; data ancorada no meio-dia do dia)
     const combos: Toque[] = (((aggRes as any).data as any[]) ?? []).map((r, i) => ({
@@ -195,7 +201,6 @@ export function AtribuicaoTab() {
     setToques(combos);
     setToquesFeed((feedRes as any).data ?? []);
     setTotalToques(count ?? 0);
-    setPedidos((peds as any) ?? []);
     setClientes((clis as any) ?? []);
     setGastos((gst as any) ?? []);
     setLoading(false);
@@ -252,6 +257,23 @@ export function AtribuicaoTab() {
       const p_ate = new Date(intervalo.fim).toISOString();
       const { data } = await supabase.rpc("atr_resumo", { p_desde, p_ate });
       if (!cancel) setResumo(data ?? null);
+    })();
+    return () => { cancel = true; };
+  }, [intervalo]);
+  // Pedidos escopados ao PERÍODO (não o histórico inteiro) — Criativos/Origens/
+  // listas usam esse conjunto. Um período fixo tem tamanho estável mesmo com o
+  // histórico crescendo; só "Máx" carrega tudo. As LISTAS ainda paginam 25/vez.
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const desde = intervalo.ini > 0 ? new Date(intervalo.ini).toISOString() : null;
+      const ate = new Date(intervalo.fim).toISOString();
+      const peds = await paginarTabela(
+        "atr_pedidos",
+        "pedido_id, cliente_id, valor, produto, ocorrido_em, vid_no_pedido, primeiro_toque, ultimo_toque",
+        { ordena: "ocorrido_em", desde, ate }
+      );
+      if (!cancel) setPedidos(peds as any);
     })();
     return () => { cancel = true; };
   }, [intervalo]);
