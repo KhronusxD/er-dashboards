@@ -341,7 +341,7 @@ CREATE TABLE IF NOT EXISTS napan.atr_gastos (
   ad_id text, ad_name text,
   gasto numeric NOT NULL DEFAULT 0,
   impressoes bigint, cliques bigint,
-  plataforma_compras bigint,      -- compras que a PLATAFORMA reporta (comparação)
+  plataforma_compras numeric,     -- compras que a PLATAFORMA reporta (fracionado no Google; comparação)
   plataforma_receita numeric,     -- receita que a PLATAFORMA reporta
   atualizado_em timestamptz NOT NULL DEFAULT now()
 );
